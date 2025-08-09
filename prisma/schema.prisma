@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum for the 'zone' field to ensure data consistency
+enum Zone {
+  NORTH
+  EAST
+  WEST
+  CENTRAL
+  SOUTH
+}
+
+model Warehouse {
+  // Switched to a custom String ID like 'WH001'
+  id                    String    @id
+  warehouseOwnerType    String
+  warehouseType         String
+  address               String    @db.Text
+  googleLocation        String?
+  city                  String
+  state                 String
+  postalCode            String?
+  zone                  Zone      // Using the Zone enum
+  contactPerson         String
+  contactNumber         String
+  totalSpaceSqft        Float
+  offeredSpaceSqft      Float?
+  numberOfDocks         Int
+  clearHeightFt         Float?
+  compliances           String[]
+  otherSpecifications   String?   @db.Text
+  ratePerSqft           Float
+  availability          DateTime?
+  uploadedBy            String
+  isBroker              Boolean?
+  photos                String[]  // Now defaults to an empty array
+
+  // Timestamps for tracking
+  createdAt             DateTime  @default(now())
+  statusUpdatedAt       DateTime  @updatedAt @map("status_updated_at")
+}
