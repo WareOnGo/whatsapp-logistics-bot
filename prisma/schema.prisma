@@ -10,17 +10,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Enum for the 'zone' field to ensure data consistency
-enum Zone {
-  NORTH
-  EAST
-  WEST
-  CENTRAL
-  SOUTH
-}
+// NOTE: The Zone enum has been removed.
 
 model Warehouse {
-  // Switched to a custom String ID like 'WH001'
   id                    String    @id
   warehouseOwnerType    String
   warehouseType         String
@@ -29,22 +21,22 @@ model Warehouse {
   city                  String
   state                 String
   postalCode            String?
-  zone                  Zone      // Using the Zone enum
+  zone                  String    // Changed from Zone enum to String
   contactPerson         String
   contactNumber         String
-  totalSpaceSqft        Float
-  offeredSpaceSqft      Float?
-  numberOfDocks         Int
-  clearHeightFt         Float?
-  compliances           String[]
+  totalSpaceSqft        String    // Changed from Float to String
+  offeredSpaceSqft      String?   // Changed from Float? to String?
+  numberOfDocks         String    // Changed from Int to String
+  clearHeightFt         String?   // Changed from Float? to String?
+  compliances           String    // Changed from String[] to String
   otherSpecifications   String?   @db.Text
-  ratePerSqft           Float
-  availability          DateTime?
+  ratePerSqft           String    // Changed from Float to String
+  availability          String?   // Changed from DateTime? to String?
   uploadedBy            String
-  isBroker              Boolean?
-  photos                String[]  // Now defaults to an empty array
+  isBroker              String?   // Changed from Boolean? to String?
+  photos                String?   // Changed from String[] to String
 
-  // Timestamps for tracking
+  // Timestamps are kept as DateTime for proper database-level tracking.
   createdAt             DateTime  @default(now())
   statusUpdatedAt       DateTime  @updatedAt @map("status_updated_at")
 }
