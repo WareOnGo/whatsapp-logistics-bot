@@ -13,6 +13,11 @@ app.use(express.json());
 // Middleware for parsing Twilio's urlencoded requests
 app.use(express.urlencoded({ extended: true }));
 
+// --- HEALTH CHECK / KEEP-ALIVE ROUTE ---
+app.get('/api/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // --- Your API Routes ---
 app.use('/api/warehouse', warehouseRoutes);
 //app.use('/api/sync', syncRoutes);
