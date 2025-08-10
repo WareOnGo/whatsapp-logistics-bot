@@ -47,20 +47,36 @@ function parseWarehouseData(message) {
     }
   });
 
-  // --- Simplified Validation ---
+  // --- Updated Validation ---
   
-  // Define which fields are compulsory in the message
-  const required = ['warehouseOwnerType', 'warehouseType', 'address', 'city', 'state', 'contactPerson', 'contactNumber', 'totalSpaceSqft', 'numberOfDocks', 'compliances', 'ratePerSqft', 'uploadedBy'];
+  const required = [
+    'warehouseType',
+    'address',
+    'city',
+    'state',
+    'contactPerson',
+    'contactNumber',
+    'totalSpaceSqft',
+    'compliances',
+    'ratePerSqft',
+    'uploadedBy'
+  ];
   
-  // Check if all required fields were found in the message
+  // 1. Create an empty array to hold the names of any missing fields.
+  const missingFields = [];
+  
+  // 2. Loop through the required fields and collect any that are missing.
   for (const field of required) {
     if (!data[field]) {
-      throw new Error(`Missing required field from message: ${field}`);
+      missingFields.push(field);
     }
   }
+  
+  // 3. After checking all fields, if the missingFields array is not empty, throw a single error.
+  if (missingFields.length > 0) {
+    throw new Error(`Missing required fields from message: ${missingFields.join(', ')}`);
+  }
 
-  // NOTE: All type conversion logic has been removed.
-  // The function returns the raw string data extracted from the message.
   return data;
 }
 

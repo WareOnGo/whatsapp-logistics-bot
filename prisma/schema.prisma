@@ -13,30 +13,41 @@ datasource db {
 // NOTE: The Zone enum has been removed.
 
 model Warehouse {
-  id                    String    @id
-  warehouseOwnerType    String
+  id                    Int       @id @default(autoincrement())
+  warehouseOwnerType    String?
   warehouseType         String
   address               String    @db.Text
   googleLocation        String?
   city                  String
   state                 String
   postalCode            String?
-  zone                  String    // Changed from Zone enum to String
+  zone                  String    
   contactPerson         String
   contactNumber         String
-  totalSpaceSqft        String    // Changed from Float to String
-  offeredSpaceSqft      String?   // Changed from Float? to String?
-  numberOfDocks         String    // Changed from Int to String
-  clearHeightFt         String?   // Changed from Float? to String?
-  compliances           String    // Changed from String[] to String
+  totalSpaceSqft        String    
+  offeredSpaceSqft      String?   
+  numberOfDocks         String?   
+  clearHeightFt         String?   
+  compliances           String    
   otherSpecifications   String?   @db.Text
-  ratePerSqft           String    // Changed from Float to String
-  availability          String?   // Changed from DateTime? to String?
+  ratePerSqft           String    
+  availability          String?   
   uploadedBy            String
-  isBroker              String?   // Changed from Boolean? to String?
-  photos                String?   // Changed from String[] to String
+  isBroker              String?   
+  photos                String?  
 
   // Timestamps are kept as DateTime for proper database-level tracking.
-  createdAt             DateTime  @default(now())
-  statusUpdatedAt       DateTime  @updatedAt @map("status_updated_at")
+  createdAt             DateTime?  @default(now())
+  statusUpdatedAt       DateTime?  @updatedAt @map("status_updated_at")
+}
+
+// Add this new model to your schema.prisma file
+
+model MessageLog {
+  id            Int      @id @default(autoincrement())
+  receivedAt    DateTime @default(now()) @map("received_at")
+  senderNumber  String   @map("sender_number")
+  messageBody   String   @db.Text @map("message_body")
+  status        String   // Will store 'SUCCESS' or 'FAILURE'
+  errorMessage  String?  @db.Text @map("error_message")
 }
