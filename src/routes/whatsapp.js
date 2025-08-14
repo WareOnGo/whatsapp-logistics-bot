@@ -4,15 +4,33 @@ const express = require('express');
 const router = express.Router();
 const MessagingResponse = require('twilio').twiml.MessagingResponse;
 const parseWarehouseData = require('../utils/warehouseParser');
-const { deriveZone, saveWarehouse, logMessage } = require('../services/warehouseService'); // CHANGED: Added logMessage
+const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
 
 router.post('/', async (req, res) => {
   const twiml = new MessagingResponse();
-  
-  // CHANGED: Get sender and message body from Twilio's request
-  const senderNumber = req.body.From;
+
+  const senderNumber = req.body.From.replace('whatsapp:', '').trim();
   const messageBody = req.body.Body;
 
+  const isVerified = await isVerifiedNumber(senderNumber);
+
+  if (!isVerified) {
+    // NEW: Log the unverified attempt before stopping.
+    await logMessage({
+      senderNumber: senderNumber,
+      messageBody: messageBody,
+      status: 'UNVERIFIED_ATTEMPT',
+      errorMessage: 'Sender number is not on the allowlist.',
+    });
+    
+    // Then, send the empty response to do nothing and save costs.
+    console.log(`Ignoring message from unverified number: ${senderNumber}`);
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end('<Response/>');
+    return;
+  }
+
+  // If verified, the logic continues as before...
   try {
     const parsedData = parseWarehouseData(messageBody);
     const zone = deriveZone(parsedData.state);
@@ -24,7 +42,6 @@ router.post('/', async (req, res) => {
 
     const newWarehouse = await saveWarehouse(finalData);
 
-    // Log the successful attempt
     await logMessage({
       senderNumber: senderNumber,
       messageBody: messageBody,
@@ -37,12 +54,11 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error('Error processing WhatsApp message:', err.message);
 
-    // Log the failed attempt
     await logMessage({
       senderNumber: senderNumber,
       messageBody: messageBody,
       status: 'FAILURE',
-      errorMessage: err.message, // Include the error message
+      errorMessage: err.message,
     });
 
     const errorMessage = `❌ Error: We couldn't process your data. \n\n*Reason*: ${err.message} \n\nPlease correct the message and try again.`;

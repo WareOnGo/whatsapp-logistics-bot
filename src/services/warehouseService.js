@@ -85,8 +85,19 @@ async function logMessage(logData) {
   }
 }
 
+async function isVerifiedNumber(senderNumber) {
+  const verifiedUser = await prisma.verifiedNumber.findFirst({
+    where: {
+      phoneNumber: senderNumber,
+      isActive: true,
+    },
+  });
+  return !!verifiedUser; // Returns true if a user is found, false otherwise
+}
+
 module.exports = {
   deriveZone,
   saveWarehouse,
-  logMessage
+  logMessage,
+  isVerifiedNumber
 };

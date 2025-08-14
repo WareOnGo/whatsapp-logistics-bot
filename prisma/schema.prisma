@@ -51,3 +51,11 @@ model MessageLog {
   status        String   // Will store 'SUCCESS' or 'FAILURE'
   errorMessage  String?  @db.Text @map("error_message")
 }
+
+model VerifiedNumber {
+  id           Int      @id @default(autoincrement())
+  phoneNumber  String   @unique @map("phone_number")
+  name         String
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+}
