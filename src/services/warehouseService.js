@@ -77,6 +77,7 @@ async function logMessage(logData) {
         messageBody: logData.messageBody,
         status: logData.status,
         errorMessage: logData.errorMessage,
+        imageUrl: logData.imageUrl,
       },
     });
   } catch (error) {

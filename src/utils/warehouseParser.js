@@ -8,6 +8,7 @@ function parseWarehouseData(message) {
     'warehouse owner type': 'warehouseOwnerType',
     'warehouse type': 'warehouseType',
     'address': 'address',
+      'media available': 'mediaAvailable', 
     'google location': 'googleLocation',
     'city': 'city',
     'state': 'state',

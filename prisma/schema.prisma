@@ -10,8 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// NOTE: The Zone enum has been removed.
-
 model Warehouse {
   id                    Int       @id @default(autoincrement())
   warehouseOwnerType    String?
@@ -34,22 +32,20 @@ model Warehouse {
   availability          String?   
   uploadedBy            String
   isBroker              String?   
-  photos                String?  
+  photos                String?   
 
-  // Timestamps are kept as DateTime for proper database-level tracking.
-  createdAt             DateTime?  @default(now())
-  statusUpdatedAt       DateTime?  @updatedAt @map("status_updated_at")
+  createdAt             DateTime? @default(now())
+  statusUpdatedAt       DateTime? @updatedAt @map("status_updated_at")
 }
-
-// Add this new model to your schema.prisma file
 
 model MessageLog {
   id            Int      @id @default(autoincrement())
   receivedAt    DateTime @default(now()) @map("received_at")
   senderNumber  String   @map("sender_number")
   messageBody   String   @db.Text @map("message_body")
-  status        String   // Will store 'SUCCESS' or 'FAILURE'
+  status        String
   errorMessage  String?  @db.Text @map("error_message")
+  imageUrl      String?  @map("image_url")
 }
 
 model VerifiedNumber {
@@ -58,4 +54,14 @@ model VerifiedNumber {
   name         String
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
+}
+
+// --- NEW DRAFT TABLE ADDED BELOW ---
+
+model Draft {
+  senderNumber    String   @id @map("sender_number")
+  status          String   // e.g., 'awaiting_images'
+  warehouseData   Json     @map("warehouse_data")
+  imageUrls       String[] @map("image_urls")
+  createdAt       DateTime @default(now()) @map("created_at")
 }
