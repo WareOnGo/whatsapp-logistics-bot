@@ -1,11 +1,10 @@
-// routes/whatsapp.js
-
 const express = require('express');
 const router = express.Router();
 const MessagingResponse = require('twilio').twiml.MessagingResponse;
 const { PrismaClient } = require('@prisma/client');
 const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
+const { uploadMediaFromUrl } = require('../services/storageService');
 
 const prisma = new PrismaClient();
 
@@ -15,15 +14,18 @@ router.post('/', async (req, res) => {
   const messageBody = (req.body.Body || '').trim();
   const numMedia = parseInt(req.body.NumMedia || '0');
   const imageUrl = numMedia > 0 ? req.body.MediaUrl0 : null;
+  const contentType = numMedia > 0 ? req.body.MediaContentType0 : null;
 
+  // Step 1: Verify the sender is on the allowlist
   const isVerified = await isVerifiedNumber(senderNumber);
   if (!isVerified) {
-    await logMessage({ senderNumber, messageBody, status: 'UNVERIFIED_ATTEMPT', imageUrl: imageUrl });
+    await logMessage({ senderNumber, messageBody, status: 'UNVERIFIED_ATTEMPT', imageUrl });
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end('<Response/>');
     return;
   }
 
+  // Step 2: Check for an active draft and handle expiration
   let userDraft = await prisma.draft.findUnique({
     where: { senderNumber: senderNumber },
   });
@@ -41,6 +43,7 @@ router.post('/', async (req, res) => {
   try {
     const command = messageBody.toLowerCase();
 
+    // Scenario A: User finalizes a submission
     if (userDraft && command === 'close') {
       const { mediaAvailable, ...warehouseData } = userDraft.warehouseData;
       const finalData = {
@@ -58,34 +61,45 @@ router.post('/', async (req, res) => {
       });
       twiml.message(`✅ All done! Warehouse submission complete. Your ID is *${newWarehouse.id}*.`);
 
+    // Scenario B: User cancels a submission
     } else if (userDraft && command === 'cancel') {
       await prisma.draft.delete({ where: { senderNumber: senderNumber } });
       twiml.message(`Submission canceled. You can now start a new one.`);
 
+    // Scenario C: User adds media to an existing draft
     } else if (userDraft && imageUrl) {
+      const permanentUrl = await uploadMediaFromUrl(imageUrl, contentType);
       await prisma.draft.update({
         where: { senderNumber: senderNumber },
-        data: { imageUrls: { push: imageUrl } },
+        data: { imageUrls: { push: permanentUrl } },
       });
       twiml.message(`👍 Image received. Send more media, reply "close" to finalize, or "cancel" to start over.`);
     
+    // Scenario D: User sends new text while a draft is open
     } else if (userDraft && messageBody) {
         twiml.message(`You already have a submission in progress. To add media, please send a photo/PDF. To finalize, reply "close". To start over, reply "cancel".`);
 
+    // Scenario E: User sends 'close' or 'cancel' with no draft
     } else if (!userDraft && (command === 'close' || command === 'cancel')) {
       twiml.message(`No active submission found. Ready to receive new warehouse details.`);
 
+    // Scenario F: User starts a new submission
     } else if (!userDraft && messageBody) {
       const parsedData = parseWarehouseData(messageBody);
       const mediaAvailableValue = (parsedData.mediaAvailable || 'n').toLowerCase();
 
       if (mediaAvailableValue === 'y' || mediaAvailableValue === 'yes') {
+        let initialImageUrls = [];
+        if (imageUrl) {
+            const permanentUrl = await uploadMediaFromUrl(imageUrl, contentType);
+            initialImageUrls.push(permanentUrl);
+        }
         await prisma.draft.create({
           data: {
             senderNumber: senderNumber,
             status: 'awaiting_images',
             warehouseData: parsedData,
-            imageUrls: imageUrl ? [imageUrl] : [],
+            imageUrls: initialImageUrls,
           },
         });
         const currentMessage = twiml.toString().includes('expired') ? twiml.toString() : '';
@@ -95,17 +109,22 @@ router.post('/', async (req, res) => {
         return res.end(newTwiml.toString());
         
       } else {
+        let permanentUrl = null;
+        if (imageUrl) {
+            permanentUrl = await uploadMediaFromUrl(imageUrl, contentType);
+        }
         const { mediaAvailable, ...warehouseData } = parsedData;
         const finalData = { 
             ...warehouseData, 
             zone: deriveZone(parsedData.state), 
-            photos: imageUrl // Ensure image is saved if sent with "media available: n"
+            photos: permanentUrl
         };
         const newWarehouse = await saveWarehouse(finalData);
-        await logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: imageUrl });
+        await logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: permanentUrl });
         twiml.message(`✅ Success! No media expected. Your warehouse data has been saved with ID: *${newWarehouse.id}*.`);
       }
 
+    // Scenario G: Any other unexpected situation
     } else {
       const templateMessage = `To start a new submission, please copy this template, fill in the details, and send it back:
 
