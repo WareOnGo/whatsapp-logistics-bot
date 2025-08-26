@@ -3,7 +3,8 @@
 const express = require('express');
 const warehouseRoutes = require('./routes/warehouse'); // Old route for Postman testing
 //const syncRoutes = require('./routes/sync');
-const whatsappRoutes = require('./routes/whatsapp'); // Your new WhatsApp route
+const whatsappRoutes = require('./routes/whatsapp'); 
+const testRoutes = require('./routes/test');
 
 const app = express();
 
@@ -23,5 +24,6 @@ app.use('/api/warehouse', warehouseRoutes);
 //app.use('/api/sync', syncRoutes);
 app.use('/api/whatsapp', whatsappRoutes); // Use the new route
 
-// ... rest of your server setup (port listening etc.)
+app.use('/api/test', testRoutes); // Add this
+
 module.exports = app;

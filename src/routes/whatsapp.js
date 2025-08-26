@@ -18,7 +18,7 @@ router.post('/', async (req, res) => {
 
   const isVerified = await isVerifiedNumber(senderNumber);
   if (!isVerified) {
-    await logMessage({ senderNumber, messageBody, status: 'UNVERIFIED_ATTEMPT' });
+    await logMessage({ senderNumber, messageBody, status: 'UNVERIFIED_ATTEMPT', imageUrl: imageUrl });
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end('<Response/>');
     return;
@@ -42,20 +42,20 @@ router.post('/', async (req, res) => {
     const command = messageBody.toLowerCase();
 
     if (userDraft && command === 'close') {
-      // --- CHANGED BLOCK 1 ---
-      // Destructure to separate mediaAvailable from the actual warehouse data
       const { mediaAvailable, ...warehouseData } = userDraft.warehouseData;
-      
       const finalData = {
         ...warehouseData,
         photos: userDraft.imageUrls.join(', '),
         zone: deriveZone(userDraft.warehouseData.state),
       };
-      // --- END CHANGED BLOCK 1 ---
-
       const newWarehouse = await saveWarehouse(finalData);
       await prisma.draft.delete({ where: { senderNumber: senderNumber } });
-      await logMessage({ senderNumber, messageBody: `[Submission Finalized]`, status: 'SUCCESS' });
+      await logMessage({ 
+        senderNumber, 
+        messageBody: `[Submission Finalized with ${userDraft.imageUrls.length} images]`, 
+        status: 'SUCCESS', 
+        imageUrl: userDraft.imageUrls[0] || null 
+      });
       twiml.message(`✅ All done! Warehouse submission complete. Your ID is *${newWarehouse.id}*.`);
 
     } else if (userDraft && command === 'cancel') {
@@ -74,9 +74,8 @@ router.post('/', async (req, res) => {
 
     } else if (!userDraft && (command === 'close' || command === 'cancel')) {
       twiml.message(`No active submission found. Ready to receive new warehouse details.`);
-    }
-    
-    else if (!userDraft && messageBody) {
+
+    } else if (!userDraft && messageBody) {
       const parsedData = parseWarehouseData(messageBody);
       const mediaAvailableValue = (parsedData.mediaAvailable || 'n').toLowerCase();
 
@@ -96,36 +95,31 @@ router.post('/', async (req, res) => {
         return res.end(newTwiml.toString());
         
       } else {
-        // --- CHANGED BLOCK 2 ---
-        // Destructure to separate mediaAvailable from the actual warehouse data
         const { mediaAvailable, ...warehouseData } = parsedData;
-
-        const finalData = {
-          ...warehouseData,
-          zone: deriveZone(parsedData.state),
-          photos: imageUrl
+        const finalData = { 
+            ...warehouseData, 
+            zone: deriveZone(parsedData.state), 
+            photos: imageUrl // Ensure image is saved if sent with "media available: n"
         };
-        // --- END CHANGED BLOCK 2 ---
-        
         const newWarehouse = await saveWarehouse(finalData);
-        await logMessage({ senderNumber, messageBody, status: 'SUCCESS' });
+        await logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: imageUrl });
         twiml.message(`✅ Success! No media expected. Your warehouse data has been saved with ID: *${newWarehouse.id}*.`);
       }
 
     } else {
       const templateMessage = `To start a new submission, please copy this template, fill in the details, and send it back:
 
-      Warehouse Type: 
-      Address: 
-      City: 
-      State: 
-      Contact Person: 
-      Contact Number: 
-      Total Space: 
-      Compliances: 
-      Rate Per Sqft: 
-      Uploaded by: 
-      Media Available (y/n): `;
+Warehouse Type: 
+Address: 
+City: 
+State: 
+Contact Person: 
+Contact Number: 
+Total Space: 
+Compliances: 
+Rate Per Sqft: 
+Uploaded by: 
+Media Available (y/n): `;
       twiml.message(templateMessage);
     }
 
@@ -133,7 +127,7 @@ router.post('/', async (req, res) => {
     if (userDraft) {
       await prisma.draft.delete({ where: { senderNumber: senderNumber } });
     }
-    await logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: err.message });
+    await logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: err.message, imageUrl: imageUrl });
     console.error('Error during submission:', err.message);
     const errorMessage = `❌ Error: ${err.message}`;
     twiml.message(errorMessage);
