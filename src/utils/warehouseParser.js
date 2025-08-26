@@ -1,4 +1,20 @@
+// src/utils/warehouseParser.js
+
 const Fuse = require('fuse.js');
+
+/**
+ * Parses a string of sizes (e.g., "500 sqft, 600 sq ft") into an array of integers.
+ */
+function parseSizesToArray(input) {
+  if (!input) return [];
+  return input
+    .split(',')
+    .map(part => {
+      const cleanPart = part.replace(/\D/g, '');
+      return cleanPart ? parseInt(cleanPart, 10) : null;
+    })
+    .filter(num => num !== null);
+}
 
 function parseWarehouseData(message) {
   const lines = message.split('\n').filter(line => line.trim() !== '');
@@ -8,7 +24,6 @@ function parseWarehouseData(message) {
     'warehouse owner type': 'warehouseOwnerType',
     'warehouse type': 'warehouseType',
     'address': 'address',
-      'media available': 'mediaAvailable', 
     'google location': 'googleLocation',
     'city': 'city',
     'state': 'state',
@@ -25,7 +40,8 @@ function parseWarehouseData(message) {
     'availability': 'availability',
     'uploaded by': 'uploadedBy',
     'is broker (y/n)?': 'isBroker',
-    'photos': 'photos'
+    'photos': 'photos',
+    'media available': 'mediaAvailable',
   };
 
   const fuse = new Fuse(Object.keys(keyMap), {
@@ -36,11 +52,9 @@ function parseWarehouseData(message) {
   lines.forEach(line => {
     const parts = line.split(':');
     if (parts.length < 2) return;
-
     const keyFromMessage = parts[0].trim();
     const value = parts.slice(1).join(':').trim();
     const results = fuse.search(keyFromMessage);
-
     if (results.length > 0) {
       const bestMatchKey = results[0].item;
       const modelKey = keyMap[bestMatchKey];
@@ -48,34 +62,29 @@ function parseWarehouseData(message) {
     }
   });
 
-  // --- Updated Validation ---
-  
+  // --- UPDATED PARSING LOGIC ---
+  // Only convert totalSpaceSqft to an integer array
+  if (data.totalSpaceSqft) {
+    data.totalSpaceSqft = parseSizesToArray(data.totalSpaceSqft);
+  }
+  // offeredSpaceSqft is left as a string
+  // --- END OF UPDATED LOGIC ---
+
   const required = [
-    'warehouseType',
-    'address',
-    'city',
-    'state',
-    'contactPerson',
-    'contactNumber',
-    'totalSpaceSqft',
-    'compliances',
-    'ratePerSqft',
-    'uploadedBy'
+    'warehouseType', 'address', 'city', 'state', 'contactPerson', 
+    'contactNumber', 'totalSpaceSqft', 'compliances', 'ratePerSqft', 'uploadedBy'
   ];
   
-  // 1. Create an empty array to hold the names of any missing fields.
   const missingFields = [];
-  
-  // 2. Loop through the required fields and collect any that are missing.
   for (const field of required) {
-    if (!data[field]) {
+    // Check if the field is missing or (if it's totalSpaceSqft) is an empty array
+    if (!data[field] || (field === 'totalSpaceSqft' && data[field].length === 0)) {
       missingFields.push(field);
     }
   }
   
-  // 3. After checking all fields, if the missingFields array is not empty, throw a single error.
   if (missingFields.length > 0) {
-    throw new Error(`Missing required fields from message: ${missingFields.join(', ')}`);
+    throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
   }
 
   return data;

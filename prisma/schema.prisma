@@ -22,8 +22,8 @@ model Warehouse {
   zone                  String    
   contactPerson         String
   contactNumber         String
-  totalSpaceSqft        String    
-  offeredSpaceSqft      String?   
+  totalSpaceSqft        Int[]     // <-- CHANGED
+  offeredSpaceSqft      String?   // <-- CHANGED
   numberOfDocks         String?   
   clearHeightFt         String?   
   compliances           String    
