@@ -45,12 +45,32 @@ router.post('/', async (req, res) => {
 
     // Scenario A: User finalizes a submission
     if (userDraft && command === 'close') {
-      const { mediaAvailable, ...warehouseData } = userDraft.warehouseData;
+      const warehouseData = userDraft.warehouseData;
+      
       const finalData = {
-        ...warehouseData,
+        warehouseOwnerType: warehouseData.warehouseOwnerType,
+        warehouseType: warehouseData.warehouseType,
+        address: warehouseData.address,
+        googleLocation: warehouseData.googleLocation,
+        city: warehouseData.city,
+        state: warehouseData.state,
+        postalCode: warehouseData.postalCode,
+        contactPerson: warehouseData.contactPerson,
+        contactNumber: warehouseData.contactNumber,
+        numberOfDocks: warehouseData.numberOfDocks,
+        clearHeightFt: warehouseData.clearHeightFt,
+        compliances: warehouseData.compliances,
+        otherSpecifications: warehouseData.otherSpecifications,
+        ratePerSqft: warehouseData.ratePerSqft,
+        availability: warehouseData.availability,
+        uploadedBy: warehouseData.uploadedBy,
+        isBroker: warehouseData.isBroker,
+        totalSpaceSqft: Array.isArray(warehouseData.totalSpaceSqft) ? warehouseData.totalSpaceSqft : [],
+        offeredSpaceSqft: warehouseData.offeredSpaceSqft,
         photos: userDraft.imageUrls.join(', '),
-        zone: deriveZone(userDraft.warehouseData.state),
+        zone: deriveZone(warehouseData.state),
       };
+
       const newWarehouse = await saveWarehouse(finalData);
       await prisma.draft.delete({ where: { senderNumber: senderNumber } });
       await logMessage({ 
