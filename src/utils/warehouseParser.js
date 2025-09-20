@@ -71,7 +71,7 @@ function parseWarehouseData(message) {
   // --- END OF UPDATED LOGIC ---
 
   const required = [
-    'warehouseType', 'address', 'city', 'state', 'contactPerson', 
+    'warehouseType', 'address', 'city', 'state', 'postalCode', 'contactPerson', 
     'contactNumber', 'totalSpaceSqft', 'compliances', 'ratePerSqft', 'uploadedBy'
   ];
   
@@ -85,6 +85,14 @@ function parseWarehouseData(message) {
   
   if (missingFields.length > 0) {
     throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+  }
+
+  // Validate ratePerSqft cannot be zero
+  if (data.ratePerSqft !== undefined) {
+    const rateValue = parseFloat(data.ratePerSqft);
+    if (!isNaN(rateValue) && rateValue === 0) {
+      throw new Error('Zero value is not allowed in rate per sqft');
+    }
   }
 
   return data;

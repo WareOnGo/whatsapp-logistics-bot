@@ -62,7 +62,7 @@ function deriveZone(state) {
     case 'chhattisgarh':
       return 'CENTRAL';
     default:
-      throw new Error(`Could not determine zone for state: ${state}`);
+      return 'MISCELLANEOUS'; // Default zone for unrecognized states
   }
 }
 
