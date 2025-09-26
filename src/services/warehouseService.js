@@ -64,9 +64,25 @@ function deriveZone(state) {
 }
 
 async function saveWarehouse(data) {
-  return await prisma.warehouse.create({
-    data: data
+  // Extract the new WarehouseData fields
+  const { fireNocAvailable, fireSafetyMeasures, landType, ...warehouseData } = data;
+  
+  // Create the warehouse record first
+  const warehouse = await prisma.warehouse.create({
+    data: warehouseData
   });
+  
+  // Always create the related WarehouseData record since fireNocAvailable and fireSafetyMeasures are mandatory
+  await prisma.warehouseData.create({
+    data: {
+      warehouseId: warehouse.id,
+      fireNocAvailable: typeof fireNocAvailable === 'boolean' ? fireNocAvailable : null,
+      fireSafetyMeasures: fireSafetyMeasures || null,
+      landType: landType || null,
+    }
+  });
+  
+  return warehouse;
 }
 
 async function logMessage(logData) {

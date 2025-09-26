@@ -148,15 +148,26 @@ router.post('/', async (req, res) => {
     } else {
       const templateMessage = `To start a new submission, please copy this template, fill in the details, and send it back:
 
+Warehouse Owner Type: 
 Warehouse Type: 
 Address: 
 City: 
 State: 
+Postalcode: 
+Google Location: 
 Contact Person: 
 Contact Number: 
 Total Space: 
+Number of Docks: 
+Clear Height: 
 Compliances: 
+Other Specifications: 
 Rate Per Sqft: 
+Fire NOC Available (y/n): 
+Fire Safety Measures: 
+Land Type: 
+Availability: 
+Is Broker (y/n)?: 
 Uploaded by: 
 Media Available (y/n): `;
       twiml.message(templateMessage);

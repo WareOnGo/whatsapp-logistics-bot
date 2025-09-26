@@ -36,6 +36,9 @@ model Warehouse {
 
   createdAt             DateTime? @default(now())
   statusUpdatedAt       DateTime? @updatedAt @map("status_updated_at")
+  
+  // Relation to WarehouseData
+  warehouseData         WarehouseData?
 }
 
 model MessageLog {
@@ -64,4 +67,24 @@ model Draft {
   warehouseData   Json     @map("warehouse_data")
   imageUrls       String[] @map("image_urls")
   createdAt       DateTime @default(now()) @map("created_at")
+}
+
+model WarehouseData {
+  id                  Int       @id @default(autoincrement())
+  latitude            Float?
+  longitude           Float?
+  
+  // Prisma doesn't natively support the 'vector' type, so we use 'Unsupported'.
+  // 1536 is the dimension for OpenAI's text-embedding-3-small model.
+  embedding           Unsupported("vector(1536)")?
+
+  // The new fields you added
+  fireNocAvailable    Boolean?
+  fireSafetyMeasures  String?
+  landType            String?
+
+  // This sets up the one-to-one relationship with the Warehouse table.
+  // @unique ensures one warehouse can only have one set of derived data.
+  warehouseId         Int       @unique
+  warehouse           Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
 }

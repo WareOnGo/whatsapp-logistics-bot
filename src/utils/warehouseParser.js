@@ -42,6 +42,10 @@ function parseWarehouseData(message) {
     'is broker (y/n)?': 'isBroker',
     'photos': 'photos',
     'media available': 'mediaAvailable',
+    'fire noc availability': 'fireNocAvailable',
+    'fire noc available': 'fireNocAvailable',
+    'fire safety measures': 'fireSafetyMeasures',
+    'land type': 'landType',
   };
 
   const fuse = new Fuse(Object.keys(keyMap), {
@@ -68,11 +72,25 @@ function parseWarehouseData(message) {
     data.totalSpaceSqft = parseSizesToArray(data.totalSpaceSqft);
   }
   // offeredSpaceSqft is left as a string
+  
+  // Parse Fire NOC availability to boolean
+  if (data.fireNocAvailable) {
+    const nocValue = data.fireNocAvailable.toLowerCase().trim();
+    if (nocValue === 'y' || nocValue === 'yes') {
+      data.fireNocAvailable = true;
+    } else if (nocValue === 'n' || nocValue === 'no') {
+      data.fireNocAvailable = false;
+    } else {
+      // Keep as string if it's not a clear y/n response
+      data.fireNocAvailable = data.fireNocAvailable;
+    }
+  }
   // --- END OF UPDATED LOGIC ---
 
   const required = [
     'warehouseType', 'address', 'city', 'state', 'postalCode', 'contactPerson', 
-    'contactNumber', 'totalSpaceSqft', 'compliances', 'ratePerSqft', 'uploadedBy'
+    'contactNumber', 'totalSpaceSqft', 'compliances', 'ratePerSqft', 'uploadedBy',
+    'fireNocAvailable', 'fireSafetyMeasures'
   ];
   
   const missingFields = [];
