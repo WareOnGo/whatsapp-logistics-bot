@@ -158,6 +158,7 @@ Google Location:
 Contact Person: 
 Contact Number: 
 Total Space: 
+Offered Space: 
 Number of Docks: 
 Clear Height: 
 Compliances: 

@@ -95,8 +95,14 @@ function parseWarehouseData(message) {
   
   const missingFields = [];
   for (const field of required) {
+    // Special handling for boolean fields
+    if (field === 'fireNocAvailable') {
+      if (data[field] === undefined || data[field] === null) {
+        missingFields.push(field);
+      }
+    }
     // Check if the field is missing or (if it's totalSpaceSqft) is an empty array
-    if (!data[field] || (field === 'totalSpaceSqft' && data[field].length === 0)) {
+    else if (!data[field] || (field === 'totalSpaceSqft' && data[field].length === 0)) {
       missingFields.push(field);
     }
   }
