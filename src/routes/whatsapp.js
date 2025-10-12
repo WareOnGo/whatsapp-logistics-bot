@@ -68,6 +68,10 @@ router.post('/', async (req, res) => {
         totalSpaceSqft: Array.isArray(warehouseData.totalSpaceSqft) ? warehouseData.totalSpaceSqft : [],
         offeredSpaceSqft: warehouseData.offeredSpaceSqft,
         photos: userDraft.imageUrls.join(', '),
+        // include WarehouseData fields so saveWarehouse can persist them
+        fireNocAvailable: warehouseData.fireNocAvailable,
+        fireSafetyMeasures: warehouseData.fireSafetyMeasures,
+        landType: warehouseData.landType,
         zone: deriveZone(warehouseData.state),
       };
 
