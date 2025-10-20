@@ -72,6 +72,12 @@ router.post('/', async (req, res) => {
         fireNocAvailable: warehouseData.fireNocAvailable,
         fireSafetyMeasures: warehouseData.fireSafetyMeasures,
         landType: warehouseData.landType,
+        vaastuCompliance: warehouseData.vaastuCompliance,
+        approachRoadWidth: warehouseData.approachRoadWidth,
+        dimensions: warehouseData.dimensions,
+        parkingDockingSpace: warehouseData.parkingDockingSpace,
+        pollutionZone: warehouseData.pollutionZone,
+        powerKva: warehouseData.powerKva,
         zone: deriveZone(warehouseData.state),
       };
 
@@ -171,6 +177,12 @@ Rate Per Sqft:
 Fire NOC Available (y/n): 
 Fire Safety Measures: 
 Land Type: 
+Vaastu Compliance: 
+Approach Road Width: 
+Dimensions: 
+Parking/Docking Space: 
+Pollution Zone: 
+Power (in kva): 
 Availability: 
 Is Broker (y/n)?: 
 Uploaded by: 

@@ -46,6 +46,14 @@ function parseWarehouseData(message) {
     'fire noc available': 'fireNocAvailable',
     'fire safety measures': 'fireSafetyMeasures',
     'land type': 'landType',
+    'vaastu compliance': 'vaastuCompliance',
+    'approach road width': 'approachRoadWidth',
+    'dimensions': 'dimensions',
+    'parking/docking space': 'parkingDockingSpace',
+    'parking docking space': 'parkingDockingSpace',
+    'pollution zone': 'pollutionZone',
+    'power (in kva)': 'powerKva',
+    'power': 'powerKva',
   };
 
   const fuse = new Fuse(Object.keys(keyMap), {

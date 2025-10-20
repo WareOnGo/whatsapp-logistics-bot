@@ -1,0 +1,32 @@
+curl -X POST http://localhost:5000/api/whatsapp \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'From=whatsapp:%2B918076708542' \
+  -d 'Body=Warehouse Owner Type: individual
+Media Available: n
+Warehouse Type: PEB
+Address: KIADB Aerospace Industrial Park, Devanahalli
+City: Bangalore
+State: Karnataka
+Postal Code: 562149
+Google Location: https://maps.app.goo.gl/efLmwJJPWSauK74K6
+Contact Person: Santosh
+Contact Number: 9845226666
+Total Space: 50180 sqft
+Offered Space: 45000 sqft
+Number of Docks: 2-4
+Clear Height: 50ft
+Fire NOC Available: Y
+Fire Safety Measures: Hydrants, Fire Detectors and Alarms
+Land Type: Industrial
+Vaastu Compliance: Yes, South facing entrance
+Approach Road Width: 40 feet
+Dimensions: 200x250 ft
+Parking/Docking Space: 10 trucks capacity
+Pollution Zone: Green Zone
+Power (in kva): 1000
+Compliances: Industrial Land Sanction, Fire NOC
+Other Specifications: 1000kva power supply, Rainwater harvesting, STP available
+Rate Per Sqft: 40
+Availability: Immediate
+Is Broker (y/n)?: n
+Uploaded by: Santosh Kumar'

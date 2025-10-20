@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,81 +7,101 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model Warehouse {
-  id                    Int       @id @default(autoincrement())
-  warehouseOwnerType    String?
-  warehouseType         String
-  address               String    @db.Text
-  googleLocation        String?
-  city                  String
-  state                 String
-  postalCode            String?
-  zone                  String    
-  contactPerson         String
-  contactNumber         String
-  totalSpaceSqft        Int[]     // <-- CHANGED
-  offeredSpaceSqft      String?   // <-- CHANGED
-  numberOfDocks         String?   
-  clearHeightFt         String?   
-  compliances           String    
-  otherSpecifications   String?   @db.Text
-  ratePerSqft           String    
-  availability          String?   
-  uploadedBy            String
-  isBroker              String?   
-  photos                String?   
+  warehouseOwnerType  String?
+  warehouseType       String
+  address             String
+  googleLocation      String?
+  city                String
+  state               String
+  postalCode          String?
+  zone                String
+  contactPerson       String
+  contactNumber       String
+  totalSpaceSqft      Int[]
+  offeredSpaceSqft    String?
+  numberOfDocks       String?
+  clearHeightFt       String?
+  compliances         String
+  otherSpecifications String?
+  ratePerSqft         String
+  availability        String?
+  uploadedBy          String
+  isBroker            String?
+  photos              String?
+  createdAt           DateTime?      @default(now())
+  statusUpdatedAt     DateTime?      @updatedAt @map("status_updated_at")
+  id                  Int            @id @default(autoincrement())
+  warehouseData       WarehouseData?
 
-  createdAt             DateTime? @default(now())
-  statusUpdatedAt       DateTime? @updatedAt @map("status_updated_at")
-  
-  // Relation to WarehouseData
-  warehouseData         WarehouseData?
+  @@index([address(ops: raw("gin_trgm_ops"))], map: "idx_warehouse_address_trgm", type: Gin)
+  @@index([clearHeightFt], map: "idx_warehouse_clear_height")
+  @@index([id, city, state, warehouseType, ratePerSqft, address, zone, contactPerson], map: "idx_warehouse_common_fields")
+  @@index([compliances(ops: raw("gin_trgm_ops"))], map: "idx_warehouse_compliances_trgm", type: Gin)
+  @@index([ratePerSqft], map: "idx_warehouse_rate")
+  @@index([totalSpaceSqft], map: "idx_warehouse_space_gin", type: Gin)
 }
 
 model MessageLog {
-  id            Int      @id @default(autoincrement())
-  receivedAt    DateTime @default(now()) @map("received_at")
-  senderNumber  String   @map("sender_number")
-  messageBody   String   @db.Text @map("message_body")
-  status        String
-  errorMessage  String?  @db.Text @map("error_message")
-  imageUrl      String?  @map("image_url")
+  id           Int      @id @default(autoincrement())
+  receivedAt   DateTime @default(now()) @map("received_at")
+  senderNumber String   @map("sender_number")
+  messageBody  String   @map("message_body")
+  status       String
+  errorMessage String?  @map("error_message")
+  imageUrl     String?  @map("image_url")
 }
 
 model VerifiedNumber {
-  id           Int      @id @default(autoincrement())
-  phoneNumber  String   @unique @map("phone_number")
-  name         String
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          Int      @id @default(autoincrement())
+  phoneNumber String   @unique @map("phone_number")
+  name        String
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
 }
 
-// --- NEW DRAFT TABLE ADDED BELOW ---
-
 model Draft {
-  senderNumber    String   @id @map("sender_number")
-  status          String   // e.g., 'awaiting_images'
-  warehouseData   Json     @map("warehouse_data")
-  imageUrls       String[] @map("image_urls")
-  createdAt       DateTime @default(now()) @map("created_at")
+  senderNumber  String   @id @map("sender_number")
+  status        String
+  warehouseData Json     @map("warehouse_data")
+  imageUrls     String[] @map("image_urls")
+  createdAt     DateTime @default(now()) @map("created_at")
 }
 
 model WarehouseData {
-  id                  Int       @id @default(autoincrement())
+  id                  Int                    @id @default(autoincrement())
   latitude            Float?
   longitude           Float?
-  
-  // Prisma doesn't natively support the 'vector' type, so we use 'Unsupported'.
-  // 1536 is the dimension for OpenAI's text-embedding-3-small model.
-  embedding           Unsupported("vector(1536)")?
-
-  // The new fields you added
+  embedding           Unsupported("vector")?
+  warehouseId         Int                    @unique
   fireNocAvailable    Boolean?
   fireSafetyMeasures  String?
   landType            String?
+  vaastuCompliance    String?
+  approachRoadWidth   String?
+  dimensions          String?
+  parkingDockingSpace String?
+  pollutionZone       String?
+  powerKva            String?
+  warehouse           Warehouse              @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+}
 
-  // This sets up the one-to-one relationship with the Warehouse table.
-  // @unique ensures one warehouse can only have one set of derived data.
-  warehouseId         Int       @unique
-  warehouse           Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+model Enquiry {
+  id           Int       @id @default(autoincrement())
+  name         String
+  phone_number String
+  email        String?
+  source       String
+  createdat    DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model customer_request {
+  id                      BigInt    @id @default(autoincrement())
+  full_name               String
+  phone_number            String?
+  company_name            String?
+  preferred_location      String?
+  additional_requirements String?
+  created_at              DateTime? @default(now()) @db.Timestamptz(6)
 }
