@@ -1,8 +1,8 @@
 {
-  "name": "wag_bot",
+  "name": "whatsapp-logistics-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "WhatsApp-based warehouse data ingestion system using Twilio, Prisma, and Cloudflare R2",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "build": "npx prisma generate",
@@ -21,7 +21,6 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "fuse.js": "^7.1.0",
-    "multer": "^2.0.2",
     "twilio": "^5.8.0"
   },
   "devDependencies": {
