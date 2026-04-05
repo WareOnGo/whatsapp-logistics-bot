@@ -42,4 +42,28 @@ async function uploadMediaFromUrl(mediaUrl, contentType) {
   }
 }
 
-module.exports = { uploadMediaFromUrl };
+/**
+ * Classifies a list of media URLs into the { images, videos, docs } structure
+ * based on file extension embedded in the R2 URL.
+ */
+function buildMediaJson(urls) {
+  const media = { images: [], videos: [], docs: [] };
+
+  const imageExts = new Set(['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'svg+xml', 'tiff', 'heic', 'heif', 'avif']);
+  const videoExts = new Set(['mp4', 'mpeg', 'webm', 'ogg', 'quicktime', 'mov', 'avi', 'mkv', '3gpp']);
+
+  for (const url of urls) {
+    const ext = (url.split('.').pop() || '').toLowerCase();
+    if (imageExts.has(ext)) {
+      media.images.push(url);
+    } else if (videoExts.has(ext)) {
+      media.videos.push(url);
+    } else {
+      media.docs.push(url);
+    }
+  }
+
+  return media;
+}
+
+module.exports = { uploadMediaFromUrl, buildMediaJson };

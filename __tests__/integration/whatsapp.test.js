@@ -37,6 +37,7 @@ jest.mock('@prisma/client', () => {
 // Mock storage service
 jest.mock('../../src/services/storageService', () => ({
   uploadMediaFromUrl: jest.fn().mockResolvedValue('https://s3.amazonaws.com/test-image.jpg'),
+  buildMediaJson: jest.fn().mockReturnValue({ images: [], videos: [], docs: [] }),
 }));
 
 // Now require the router after mocks are set up
@@ -65,6 +66,7 @@ describe('WhatsApp Webhook Integration Tests', () => {
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+919999999999',
             Body: 'Test message',
@@ -99,6 +101,7 @@ describe('WhatsApp Webhook Integration Tests', () => {
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: `Warehouse Owner Type: company
@@ -135,6 +138,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: `Warehouse Owner Type: company
@@ -174,6 +178,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: `Warehouse Owner Type: company
@@ -258,6 +263,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: 'close',
@@ -285,6 +291,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: 'cancel',
@@ -311,6 +318,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: '',
@@ -340,6 +348,7 @@ Uploaded by: Test`,
 
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: `Warehouse Owner Type: company
@@ -380,6 +389,7 @@ Uploaded by: Test`,
       test('should handle parsing errors gracefully', async () => {
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: 'Invalid warehouse data',
@@ -411,6 +421,7 @@ Uploaded by: Test`,
       test('should send template for close/cancel without draft', async () => {
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
             Body: 'close',
@@ -424,9 +435,10 @@ Uploaded by: Test`,
       test('should send template with new fields', async () => {
         const response = await request(app)
           .post('/')
+          .type('form')
           .send({
             From: 'whatsapp:+918076708542',
-            Body: 'help',
+            Body: '',
             NumMedia: '0',
           });
 

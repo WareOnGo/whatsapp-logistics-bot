@@ -4,7 +4,7 @@ const MessagingResponse = require('twilio').twiml.MessagingResponse;
 const { PrismaClient } = require('@prisma/client');
 const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
-const { uploadMediaFromUrl } = require('../services/storageService');
+const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageService');
 
 const prisma = new PrismaClient();
 
@@ -68,6 +68,7 @@ router.post('/', async (req, res) => {
         totalSpaceSqft: Array.isArray(warehouseData.totalSpaceSqft) ? warehouseData.totalSpaceSqft : [],
         offeredSpaceSqft: warehouseData.offeredSpaceSqft,
         photos: userDraft.imageUrls.join(', '),
+        media: buildMediaJson(userDraft.imageUrls),
         // include WarehouseData fields so saveWarehouse can persist them
         fireNocAvailable: warehouseData.fireNocAvailable,
         fireSafetyMeasures: warehouseData.fireSafetyMeasures,
@@ -144,10 +145,11 @@ router.post('/', async (req, res) => {
             permanentUrl = await uploadMediaFromUrl(imageUrl, contentType);
         }
         const { mediaAvailable, ...warehouseData } = parsedData;
-        const finalData = { 
-            ...warehouseData, 
-            zone: deriveZone(parsedData.state), 
-            photos: permanentUrl
+        const finalData = {
+            ...warehouseData,
+            zone: deriveZone(parsedData.state),
+            photos: permanentUrl,
+            media: permanentUrl ? buildMediaJson([permanentUrl]) : null,
         };
         const newWarehouse = await saveWarehouse(finalData);
         await logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: permanentUrl });
