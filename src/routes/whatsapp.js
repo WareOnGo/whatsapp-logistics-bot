@@ -7,7 +7,9 @@ const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
 const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageService');
 
-const TWENTY_RFQ_URL = 'https://twenty-automations.onrender.com/rfq';
+const TWENTY_BASE_URL = 'https://twenty-automations.onrender.com';
+const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
+const TWENTY_HEALTH_URL = `${TWENTY_BASE_URL}/health`;
 const TWENTY_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 const prisma = new PrismaClient();
@@ -204,15 +206,27 @@ Media Available (y/n): `;
     // If parse failed but message contains #twenty, forward to Twenty CRM as an RFQ
     if (messageBody.toLowerCase().includes('#twenty')) {
       try {
-        const twentyResponse = await axios.post(TWENTY_RFQ_URL, { rfq: messageBody }, { timeout: TWENTY_TIMEOUT_MS });
-        await logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: imageUrl });
-        twiml.message(`✅ SUCCESS\n\n${JSON.stringify(twentyResponse.data, null, 2)}`);
-      } catch (twentyErr) {
-        const twentyErrData = twentyErr.response?.data || { error: twentyErr.message };
-        await logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: `Twenty CRM error: ${twentyErrData.error || twentyErr.message}`, imageUrl: imageUrl });
-        console.error('Twenty CRM forwarding failed:', twentyErrData);
-        twiml.message(`❌ FAILED\n\n${JSON.stringify(twentyErrData, null, 2)}`);
+        await axios.get(TWENTY_HEALTH_URL, { timeout: 10000 });
+      } catch (healthErr) {
+        await logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: 'Twenty CRM service is down', imageUrl: imageUrl });
+        twiml.message(`❌ Twenty CRM service might be down. Please try again later.`);
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        return res.end(twiml.toString());
       }
+
+      // Service is up — fire and forget
+      axios.post(TWENTY_RFQ_URL, { rfq: messageBody }, { timeout: TWENTY_TIMEOUT_MS })
+        .then(resp => {
+          logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: imageUrl });
+          console.log('Twenty CRM RFQ forwarded:', resp.data?.parsed?.name);
+        })
+        .catch(twentyErr => {
+          const errMsg = twentyErr.response?.data?.error || twentyErr.message;
+          logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: `Twenty CRM error: ${errMsg}`, imageUrl: imageUrl });
+          console.error('Twenty CRM forwarding failed:', errMsg);
+        });
+
+      twiml.message(`✅ RFQ sent to Twenty CRM. You'll see it in the CRM shortly.`);
     } else {
       await logMessage({ senderNumber, messageBody, status: 'FAILURE', errorMessage: err.message, imageUrl: imageUrl });
       console.error('Error during submission:', err.message);

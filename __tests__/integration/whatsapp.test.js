@@ -422,14 +422,9 @@ Uploaded by: Test`,
         mockPrismaInstance.draft.findUnique.mockResolvedValue(null);
       });
 
-      test('should forward to Twenty CRM when parse fails and message contains #twenty', async () => {
-        const mockCrmResponse = {
-          data: {
-            parsed: { name: 'Ramesh Enterprises - 5,000 sqft - HSR Layout, Bangalore' },
-            crm: { data: { createOpportunity: { id: 'abc-123' } } },
-          },
-        };
-        axios.post.mockResolvedValue(mockCrmResponse);
+      test('should fire-and-forget to Twenty CRM when health check passes and message contains #twenty', async () => {
+        axios.get.mockResolvedValue({ data: { status: 'ok' } });
+        axios.post.mockResolvedValue({ data: { parsed: { name: 'Test' } } });
 
         const response = await request(app)
           .post('/')
@@ -441,24 +436,20 @@ Uploaded by: Test`,
           });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('SUCCESS');
-        expect(response.text).toContain('Ramesh Enterprises');
+        expect(response.text).toContain('RFQ sent to Twenty CRM');
+        expect(axios.get).toHaveBeenCalledWith(
+          'https://twenty-automations.onrender.com/health',
+          { timeout: 10000 }
+        );
         expect(axios.post).toHaveBeenCalledWith(
           'https://twenty-automations.onrender.com/rfq',
           { rfq: 'RFQ in Bangalore\nLocation: HSR layout\nBudget: 100/sft\n#twenty' },
           { timeout: 120000 }
         );
-        expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({ status: 'SUCCESS' }),
-          })
-        );
       });
 
-      test('should return FAILED with JSON when Twenty CRM returns an error', async () => {
-        axios.post.mockRejectedValue({
-          response: { data: { error: 'Twenty CRM API error: 400' } },
-        });
+      test('should return service down message when health check fails', async () => {
+        axios.get.mockRejectedValue(new Error('connect ECONNREFUSED'));
 
         const response = await request(app)
           .post('/')
@@ -470,30 +461,13 @@ Uploaded by: Test`,
           });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('FAILED');
-        expect(response.text).toContain('Twenty CRM API error');
+        expect(response.text).toContain('service might be down');
+        expect(axios.post).not.toHaveBeenCalled();
         expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({ status: 'FAILURE' }),
           })
         );
-      });
-
-      test('should return FAILED with network error message when request fails', async () => {
-        axios.post.mockRejectedValue(new Error('timeout of 120000ms exceeded'));
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: 'random text #twenty',
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('FAILED');
-        expect(response.text).toContain('timeout');
       });
 
       test('should NOT forward to Twenty CRM when parse fails without #twenty', async () => {
@@ -508,13 +482,13 @@ Uploaded by: Test`,
 
         expect(response.status).toBe(200);
         expect(response.text).toContain('Error');
+        expect(axios.get).not.toHaveBeenCalled();
         expect(axios.post).not.toHaveBeenCalled();
       });
 
       test('should handle #twenty case-insensitively', async () => {
-        axios.post.mockResolvedValue({
-          data: { parsed: { name: 'Test Opp' }, crm: {} },
-        });
+        axios.get.mockResolvedValue({ data: { status: 'ok' } });
+        axios.post.mockResolvedValue({ data: { parsed: { name: 'Test' } } });
 
         const response = await request(app)
           .post('/')
@@ -526,7 +500,8 @@ Uploaded by: Test`,
           });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('SUCCESS');
+        expect(response.text).toContain('RFQ sent to Twenty CRM');
+        expect(axios.get).toHaveBeenCalled();
         expect(axios.post).toHaveBeenCalled();
       });
     });
