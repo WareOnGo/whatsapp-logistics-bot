@@ -40,6 +40,10 @@ jest.mock('../../src/services/storageService', () => ({
   buildMediaJson: jest.fn().mockReturnValue({ images: [], videos: [], docs: [] }),
 }));
 
+// Mock axios for Twenty CRM forwarding
+jest.mock('axios');
+const axios = require('axios');
+
 // Now require the router after mocks are set up
 const whatsappRouter = require('../../src/routes/whatsapp');
 
@@ -405,6 +409,125 @@ Uploaded by: Test`,
             }),
           })
         );
+      });
+    });
+
+    describe('Twenty CRM Forwarding (#twenty)', () => {
+      beforeEach(() => {
+        mockPrismaInstance.verifiedNumber.findFirst.mockResolvedValue({
+          id: 1,
+          phoneNumber: '+918076708542',
+          isActive: true,
+        });
+        mockPrismaInstance.draft.findUnique.mockResolvedValue(null);
+      });
+
+      test('should forward to Twenty CRM when parse fails and message contains #twenty', async () => {
+        const mockCrmResponse = {
+          data: {
+            parsed: { name: 'Ramesh Enterprises - 5,000 sqft - HSR Layout, Bangalore' },
+            crm: { data: { createOpportunity: { id: 'abc-123' } } },
+          },
+        };
+        axios.post.mockResolvedValue(mockCrmResponse);
+
+        const response = await request(app)
+          .post('/')
+          .type('form')
+          .send({
+            From: 'whatsapp:+918076708542',
+            Body: 'RFQ in Bangalore\nLocation: HSR layout\nBudget: 100/sft\n#twenty',
+            NumMedia: '0',
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('SUCCESS');
+        expect(response.text).toContain('Ramesh Enterprises');
+        expect(axios.post).toHaveBeenCalledWith(
+          'https://twenty-automations.onrender.com/rfq',
+          { rfq: 'RFQ in Bangalore\nLocation: HSR layout\nBudget: 100/sft\n#twenty' },
+          { timeout: 120000 }
+        );
+        expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'SUCCESS' }),
+          })
+        );
+      });
+
+      test('should return FAILED with JSON when Twenty CRM returns an error', async () => {
+        axios.post.mockRejectedValue({
+          response: { data: { error: 'Twenty CRM API error: 400' } },
+        });
+
+        const response = await request(app)
+          .post('/')
+          .type('form')
+          .send({
+            From: 'whatsapp:+918076708542',
+            Body: 'some bad data #twenty',
+            NumMedia: '0',
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('FAILED');
+        expect(response.text).toContain('Twenty CRM API error');
+        expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'FAILURE' }),
+          })
+        );
+      });
+
+      test('should return FAILED with network error message when request fails', async () => {
+        axios.post.mockRejectedValue(new Error('timeout of 120000ms exceeded'));
+
+        const response = await request(app)
+          .post('/')
+          .type('form')
+          .send({
+            From: 'whatsapp:+918076708542',
+            Body: 'random text #twenty',
+            NumMedia: '0',
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('FAILED');
+        expect(response.text).toContain('timeout');
+      });
+
+      test('should NOT forward to Twenty CRM when parse fails without #twenty', async () => {
+        const response = await request(app)
+          .post('/')
+          .type('form')
+          .send({
+            From: 'whatsapp:+918076708542',
+            Body: 'Invalid warehouse data',
+            NumMedia: '0',
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('Error');
+        expect(axios.post).not.toHaveBeenCalled();
+      });
+
+      test('should handle #twenty case-insensitively', async () => {
+        axios.post.mockResolvedValue({
+          data: { parsed: { name: 'Test Opp' }, crm: {} },
+        });
+
+        const response = await request(app)
+          .post('/')
+          .type('form')
+          .send({
+            From: 'whatsapp:+918076708542',
+            Body: 'some rfq #TWENTY',
+            NumMedia: '0',
+          });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('SUCCESS');
+        expect(axios.post).toHaveBeenCalled();
       });
     });
 
