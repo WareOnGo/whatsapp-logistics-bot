@@ -7,7 +7,7 @@ const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
 const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageService');
 
-const TWENTY_BASE_URL = 'https://twenty-automations.onrender.com';
+const TWENTY_BASE_URL = process.env.TWENTY_BASE_URL;
 const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
 const TWENTY_HEALTH_URL = `${TWENTY_BASE_URL}/health`;
 const TWENTY_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
