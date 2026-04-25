@@ -1,6 +1,9 @@
 // __tests__/setup.js
 // Global test setup and teardown
 
+// Load variables from .env so tests share the same config as the app
+require('dotenv').config();
+
 // Set test environment variables
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test_db';

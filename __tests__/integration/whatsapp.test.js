@@ -438,12 +438,12 @@ Uploaded by: Test`,
         expect(response.status).toBe(200);
         expect(response.text).toContain('RFQ sent to Twenty CRM');
         expect(axios.get).toHaveBeenCalledWith(
-          'https://twenty-automations.onrender.com/health',
+          `${process.env.TWENTY_BASE_URL}/health`,
           { timeout: 10000 }
         );
         expect(axios.post).toHaveBeenCalledWith(
-          'https://twenty-automations.onrender.com/rfq',
-          { rfq: 'RFQ in Bangalore\nLocation: HSR layout\nBudget: 100/sft\n#twenty' },
+          `${process.env.TWENTY_BASE_URL}/rfq`,
+          { rfq: 'RFQ in Bangalore\nLocation: HSR layout\nBudget: 100/sft\n#twenty', senderNumber: '+918076708542' },
           { timeout: 120000 }
         );
       });

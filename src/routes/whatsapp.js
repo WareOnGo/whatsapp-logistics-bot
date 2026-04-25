@@ -215,7 +215,7 @@ Media Available (y/n): `;
       }
 
       // Service is up — fire and forget
-      axios.post(TWENTY_RFQ_URL, { rfq: messageBody }, { timeout: TWENTY_TIMEOUT_MS })
+      axios.post(TWENTY_RFQ_URL, { rfq: messageBody, senderNumber }, { timeout: TWENTY_TIMEOUT_MS })
         .then(resp => {
           logMessage({ senderNumber, messageBody, status: 'SUCCESS', imageUrl: imageUrl });
           console.log('Twenty CRM RFQ forwarded:', resp.data?.parsed?.name);

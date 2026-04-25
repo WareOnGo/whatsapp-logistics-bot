@@ -25,6 +25,16 @@ WhatsApp (Twilio) --> Express Server --> Prisma --> Supabase (PostgreSQL)
 - **Immediate save** (`Media Available: n`): Text data is parsed and saved in one step.
 - **Draft flow** (`Media Available: y`): Text data is saved as a draft. User sends images, then replies `close` to finalize or `cancel` to discard. Drafts expire after 15 minutes of inactivity.
 
+### Twenty CRM RFQ Forwarding
+
+If a message fails to parse as warehouse data but contains the tag `#twenty` (case-insensitive), it is forwarded to the Twenty CRM automations service as an RFQ. The server first health-checks `${TWENTY_BASE_URL}/health`; if healthy, it fires (and forgets) a `POST` to `${TWENTY_BASE_URL}/rfq` with:
+
+```json
+{ "rfq": "<original message body>", "senderNumber": "<E.164 phone, e.g. +918076708542>" }
+```
+
+`senderNumber` is included so the CRM can maintain an audit trail back to the originating WhatsApp user.
+
 ## Tech Stack
 
 | Component | Technology |
@@ -99,6 +109,7 @@ cp .env.example .env
 | `R2_SECRET_ACCESS_KEY` | R2 secret key |
 | `R2_BUCKET_NAME` | R2 bucket name |
 | `R2_PUBLIC_URL` | R2 public URL for uploaded media |
+| `TWENTY_BASE_URL` | Base URL of the Twenty CRM automations service (used for the `#twenty` RFQ flow) |
 
 ### Database
 
