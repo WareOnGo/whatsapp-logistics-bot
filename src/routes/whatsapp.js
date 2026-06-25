@@ -6,6 +6,7 @@ const axios = require('axios');
 const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
 const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageService');
+const { isBotCommand, handleBotCommandAsync } = require('../services/openclawService');
 
 const TWENTY_BASE_URL = process.env.TWENTY_BASE_URL;
 const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
@@ -28,6 +29,16 @@ router.post('/', async (req, res) => {
     await logMessage({ senderNumber, messageBody, status: 'UNVERIFIED_ATTEMPT', imageUrl });
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end('<Response/>');
+    return;
+  }
+
+  // Step 1b: Route `/bot ...` to the OpenClaw agent. Ack Twilio immediately, then
+  // run the agent + reply via Twilio REST in the background (not awaited).
+  if (isBotCommand(messageBody)) {
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end('<Response/>');
+    handleBotCommandAsync({ to: req.body.To, from: req.body.From, body: messageBody })
+      .catch((e) => console.error('[openclaw] async handler error:', e.message));
     return;
   }
 
