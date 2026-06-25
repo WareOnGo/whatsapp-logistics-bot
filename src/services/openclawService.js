@@ -51,6 +51,40 @@ function isBotCommand(body) {
   return parseCommand(body) !== null;
 }
 
+// WhatsApp caps a single message at ~1600 chars, so long replies (e.g. a blog draft)
+// must be SPLIT into multiple messages, not truncated. Split on paragraph/line
+// boundaries; hard-split any oversized block; cap total parts as an anti-spam backstop.
+const MAX_MESSAGE_PARTS = 8;
+function chunkText(text, size = WHATSAPP_MAX_LEN) {
+  const chunks = [];
+  let buf = '';
+  const flush = () => { if (buf.trim()) chunks.push(buf.trimEnd()); buf = ''; };
+  for (const line of (text || '').split('\n')) {
+    if (line.length > size) {            // a single very long line — hard-split it
+      flush();
+      for (let i = 0; i < line.length; i += size) chunks.push(line.slice(i, i + size));
+      continue;
+    }
+    if ((buf + line + '\n').length > size) flush();
+    buf += line + '\n';
+  }
+  flush();
+  return chunks.length ? chunks : [''];
+}
+
+// Send a reply, splitting into ordered parts if it exceeds one WhatsApp message.
+async function sendReply(reply, text) {
+  const chunks = chunkText(text);
+  const parts = Math.min(chunks.length, MAX_MESSAGE_PARTS);
+  for (let i = 0; i < parts; i++) {
+    const prefix = chunks.length > 1 ? `(${i + 1}/${Math.min(chunks.length, MAX_MESSAGE_PARTS)}) ` : '';
+    await reply(prefix + chunks[i]);
+  }
+  if (chunks.length > MAX_MESSAGE_PARTS) {
+    await reply(`…(${chunks.length - MAX_MESSAGE_PARTS} more parts trimmed — reply "continue" for the rest)`);
+  }
+}
+
 // Call the OpenClaw agent via its OpenAI-compatible endpoint. `model: "openclaw"`
 // routes through the configured agent (skills, memory, model), not a raw LLM.
 // `user` (the WhatsApp number) makes the Gateway derive a STABLE per-user session
@@ -129,13 +163,13 @@ async function handleBotCommandAsync({ to, from, body }) {
     }
 
     // Extract + schedule any reminder directives (≤24h), and strip them from the
-    // user-facing text before replying.
+    // user-facing text before replying. Long replies are split across messages.
     const cleanText = handleAgentReply({ agentText: answer, to, from });
-    await reply(cleanText.slice(0, WHATSAPP_MAX_LEN));
+    await sendReply(reply, cleanText);
   } catch (err) {
     console.error('[openclaw] bot command failed:', err.response?.status, err.message);
     await reply('Sorry — I couldn’t reach the assistant just now. Please try again in a moment.');
   }
 }
 
-module.exports = { isBotCommand, handleBotCommandAsync };
+module.exports = { isBotCommand, handleBotCommandAsync, chunkText };
