@@ -14,6 +14,47 @@ const axios = require('axios');
 const twilio = require('twilio');
 const { handleAgentReply } = require('./reminderService');
 const { getHistory, appendExchange } = require('./conversationService');
+const { getActiveMedia, FRESH_MS } = require('./mediaContextService');
+const { resolveImageDataUri } = require('./mediaService');
+
+// A long-lived pin is auto-attached while fresh; after that, only when the user's message
+// actually refers to it — so we don't re-send a stale attachment on unrelated turns.
+const MEDIA_REFERENCE_RE = /\b(this|that|it|image|photo|picture|pic|pdf|doc|document|file|attachment|above|shown|screenshot|chart|diagram|page|slide)\b/i;
+
+// Resolve the user's active media pin into something askOpenClaw can attach (or null).
+async function resolvePinnedMedia(senderNumber, query) {
+  const pin = await getActiveMedia(senderNumber);
+  if (!pin) return null;
+  const fresh = Date.now() - pin.pinnedAt < FRESH_MS;
+  if (!fresh && !MEDIA_REFERENCE_RE.test(query || '')) return null; // available but not relevant now
+  const media = pin.media;
+  if (media.kind === 'image' && media.r2Url) {
+    try {
+      return { ...media, dataUri: await resolveImageDataUri(media.r2Url, media.mime) };
+    } catch (e) {
+      console.error('[media] resolve image failed:', e.message);
+      return null;
+    }
+  }
+  return media; // pdf/doc carry their text inline
+}
+
+// Build the user message content for OpenClaw, attaching pinned media if present:
+//  - image -> multimodal [text, image_url(dataUri)]  (OpenClaw vision)
+//  - pdf/doc -> text with the extracted document appended
+//  - none -> plain string
+function buildUserContent(prompt, media) {
+  if (media && media.kind === 'image' && media.dataUri) {
+    return [
+      { type: 'text', text: prompt || 'Please look at the attached image.' },
+      { type: 'image_url', image_url: { url: media.dataUri } },
+    ];
+  }
+  if (media && (media.kind === 'pdf' || media.kind === 'doc') && media.text) {
+    return `${prompt}\n\n[Attached ${media.kind.toUpperCase()} the user shared${media.truncated ? ' (truncated)' : ''}]:\n${media.text}`;
+  }
+  return prompt;
+}
 
 const OPENCLAW_URL = process.env.OPENCLAW_URL;
 const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN;
@@ -90,7 +131,7 @@ async function sendReply(reply, text) {
 // routes through the configured agent (skills, memory, model), not a raw LLM.
 // `user` (the WhatsApp number) makes the Gateway derive a STABLE per-user session
 // key, so each sender gets their own isolated, persistent conversation memory.
-async function askOpenClaw(prompt, userId, agent = 'main', history = []) {
+async function askOpenClaw(prompt, userId, agent = 'main', history = [], media = null) {
   // Give the agent the current time + the user's id so it can compute reminder
   // timing ("in 3h", "at 5pm") and emit a [[REMINDER|minutes=..|text=..]] directive.
   const systemContext =
@@ -106,7 +147,7 @@ async function askOpenClaw(prompt, userId, agent = 'main', history = []) {
       messages: [
         { role: 'system', content: systemContext },
         ...history,
-        { role: 'user', content: prompt },
+        { role: 'user', content: buildUserContent(prompt, media) },
       ],
     },
     {
@@ -130,11 +171,11 @@ async function runAgentQuery({ to, from, query, agent }) {
 
   if (!query || query.toLowerCase() === 'help') {
     await reply(
-      'Commands:\n' +
-      '`/bot <question>` — ops assistant (reminders, notes, warehouse Q&A). Starts a chat: ' +
-      'for 48h you can keep messaging with no prefix. It also drafts content when you ask. ' +
-      'Send `/stop` to exit.\n' +
-      '`/content <seed>` — one-off content draft (LinkedIn/X/blog/Reddit in WareOnGo voice).'
+      "Hi, I'm Ramesh — your WareOnGo assistant. Just message me here. I can:\n" +
+      '• set reminders & take notes\n' +
+      '• answer warehouse / ops questions\n' +
+      '• draft posts & marketing content (LinkedIn, X, blog, and more)\n\n' +
+      "You can keep chatting normally — send 'stop' to switch back to warehouse submissions."
     );
     return;
   }
@@ -145,6 +186,9 @@ async function runAgentQuery({ to, from, query, agent }) {
     // one-shots (/content) run statelessly.
     const useHistory = agent === 'main';
     const history = useHistory ? await getHistory(senderNumber) : [];
+    // Pinned attachment (image/PDF/doc) for this user — attached when fresh or referenced.
+    // Image bytes are pulled from R2 and base64'd here (only transiently in RAM).
+    const media = await resolvePinnedMedia(senderNumber, query);
 
     // Orchestration loop: ask an agent; if it returns a [[ROUTE|agent=X]] directive,
     // forward the ORIGINAL query to X. Hard-bounded against loops:
@@ -157,7 +201,7 @@ async function runAgentQuery({ to, from, query, agent }) {
     const visited = new Set([agentNow]);
     let answer = '';
     for (let hop = 0; ; hop++) {
-      answer = await askOpenClaw(query, senderNumber, agentNow, history);
+      answer = await askOpenClaw(query, senderNumber, agentNow, history, media);
       if (agentNow !== 'main') break; // only the PA delegates
       const m = answer.match(ROUTE_RE);
       const target = m && m[1].toLowerCase();

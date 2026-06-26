@@ -9,6 +9,8 @@ const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageServi
 const { parseCommand, handleBotCommandAsync, runAgentQuery, sendWhatsApp } = require('../services/openclawService');
 const { getActiveSession, startSession, endSession, isExitCommand } = require('../services/sessionService');
 const { isVoiceNote, transcribe } = require('../services/voiceService');
+const { classify, prepareMedia } = require('../services/mediaService');
+const { setActiveMedia } = require('../services/mediaContextService');
 
 const TWENTY_BASE_URL = process.env.TWENTY_BASE_URL;
 const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
@@ -62,6 +64,45 @@ router.post('/', async (req, res) => {
       }
     })();
     return;
+  }
+
+  // Step 1a.2: image / PDF / doc -> attach to the assistant — but ONLY when the user is
+  // in an assistant session (so warehouse photos still go to ingestion). The attachment
+  // is buffered and re-attached to follow-up questions (context pinning). With a caption,
+  // we answer now; without one, we ack and wait for the question.
+  if (numMedia > 0 && ['image', 'pdf', 'doc'].includes(classify(contentType))) {
+    const mediaSession = await getActiveSession(senderNumber);
+    const mediaDraft = await prisma.draft.findUnique({ where: { senderNumber } });
+    if (mediaSession && !mediaDraft) {
+      ackEmpty();
+      (async () => {
+        try {
+          const media = await prepareMedia(req.body.MediaUrl0, contentType);
+          if (media.kind === 'other') {
+            await sendWhatsApp(req.body.To, req.body.From, "I can't read that file type yet — try an image, PDF, or Word doc.");
+            return;
+          }
+          const stored = await setActiveMedia(senderNumber, media);
+          if (!stored) {
+            await sendWhatsApp(req.body.To, req.body.From, "Sorry — I couldn't save that file just now. Please try again.");
+            return;
+          }
+          await startSession(senderNumber, mediaSession.agent); // refresh window
+          const caption = messageBody.trim();
+          if (caption) {
+            await runAgentQuery({ to: req.body.To, from: req.body.From, query: caption, agent: mediaSession.agent });
+          } else {
+            const noun = media.kind === 'image' ? 'image' : `${media.kind.toUpperCase()} file`;
+            await sendWhatsApp(req.body.To, req.body.From, `📎 Got your ${noun}. What would you like to know about it?`);
+          }
+        } catch (e) {
+          console.error('[media] handler failed:', e.message);
+          await sendWhatsApp(req.body.To, req.body.From, "Sorry — I couldn't process that file just now. Please try again.").catch(() => {});
+        }
+      })();
+      return;
+    }
+    // else: not in an assistant session -> fall through to warehouse ingestion (photos).
   }
 
   // Step 1b: exit the assistant -> back to warehouse-submission mode.

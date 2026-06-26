@@ -113,6 +113,7 @@ model VerifiedNumber {
   Employee            Employee?
   AgentSession        AgentSession?
   Conversation        Conversation?
+  MediaContext        MediaContext?
 }
 
 model Draft {
@@ -134,6 +135,23 @@ model AgentSession {
   verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
 
   @@map("agent_session")
+}
+
+// Active media attachment ("pin") per user. Image bytes live in R2 (r2Url); PDF/doc text
+// is kept inline. Re-attached to the user's agent turns until expiresAt (sliding). DB-backed
+// so it survives bot restarts and supports long pin windows without holding bytes in RAM.
+model MediaContext {
+  senderNumber   String         @id @map("sender_number")
+  kind           String // image | pdf | doc
+  r2Url          String?        @map("r2_url") // images: bytes in R2
+  mime           String?
+  text           String? // pdf/doc: extracted text
+  truncated      Boolean        @default(false)
+  expiresAt      DateTime       @map("expires_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
+
+  @@map("media_context")
 }
 
 // Bot-owned conversation history per user. The bot sends these turns to OpenClaw on
