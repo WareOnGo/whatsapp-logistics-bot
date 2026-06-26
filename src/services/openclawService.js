@@ -12,11 +12,31 @@
 
 const axios = require('axios');
 const twilio = require('twilio');
-const { handleAgentReply, getPendingReminders } = require('./reminderService');
-const { getHistory, appendExchange } = require('./conversationService');
+const { handleAgentReply, getPendingReminders, cancelPending } = require('./reminderService');
+const { getHistory, appendExchange, clearHistory } = require('./conversationService');
 const { getActiveMedia, FRESH_MS } = require('./mediaContextService');
 const { resolveImageDataUri } = require('./mediaService');
-const { getOpenTasks, formatTasksForContext, handleTaskDirectives } = require('./taskService');
+const { getOpenTasks, formatTasksForContext, handleTaskDirectives, clearAllTasks } = require('./taskService');
+
+// Control directives the agent emits to ACTUALLY perform destructive/clear actions —
+// so it can never just claim "done" without the bot doing it. Stripped before reply.
+const REMINDER_CANCEL_RE = /\[\[REMINDER_CANCEL\|([a-z0-9]+)\]\]/gi;
+const TASKS_CLEAR_RE = /\[\[TASKS_CLEAR\]\]/i;
+const CONTEXT_CLEAR_RE = /\[\[CONTEXT_CLEAR\]\]/i;
+
+// Apply + strip control directives. Returns { text, contextCleared }.
+async function handleControlDirectives(text, senderNumber, pendingReminders) {
+  let out = text || '';
+  let contextCleared = false;
+  // reminder cancellations (may be multiple, e.g. all + a number)
+  const cancels = [...out.matchAll(REMINDER_CANCEL_RE)].map((m) => m[1].toLowerCase());
+  for (const which of cancels) await cancelPending(senderNumber, which, pendingReminders);
+  out = out.replace(REMINDER_CANCEL_RE, '');
+  if (TASKS_CLEAR_RE.test(out)) { await clearAllTasks(senderNumber); out = out.replace(TASKS_CLEAR_RE, ''); }
+  if (CONTEXT_CLEAR_RE.test(out)) { await clearHistory(senderNumber); contextCleared = true; out = out.replace(CONTEXT_CLEAR_RE, ''); }
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return { text: out, contextCleared };
+}
 
 // A long-lived pin is auto-attached while fresh; after that, only when the user's message
 // actually refers to it — so we don't re-send a stale attachment on unrelated turns.
@@ -60,6 +80,14 @@ function buildUserContent(prompt, media) {
 const OPENCLAW_URL = process.env.OPENCLAW_URL;
 const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN;
 const OPENCLAW_TIMEOUT_MS = 90 * 1000; // agent runs can take many seconds
+const TZ = 'Asia/Kolkata'; // WareOnGo is India
+
+// "03:53 pm" IST for a given Date — used to render bot-owned reminder times.
+// (The agent's notion of "now" comes from OpenClaw natively via
+// agents.defaults.userTimezone=Asia/Kolkata — the bot does NOT inject current time.)
+function istTime(date) {
+  return new Date(date).toLocaleTimeString('en-IN', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: true });
+}
 const WHATSAPP_MAX_LEN = 1500; // WhatsApp hard limit is ~1600; leave headroom
 
 // Command prefix -> OpenClaw agent. Each domain is its own agent (isolated
@@ -136,8 +164,9 @@ async function askOpenClaw(prompt, userId, agent = 'main', history = [], media =
   // Give the agent the current time + the user's id so it can compute reminder
   // timing ("in 3h", "at 5pm") and emit a [[REMINDER|minutes=..|text=..]] directive.
   // `extraContext` carries dynamic per-turn state (e.g. the user's open task list).
+  // Note: current date/time is injected by OpenClaw itself (userTimezone=Asia/Kolkata),
+  // so the bot does NOT send it. We only pass who the user is + bot-owned context.
   const systemContext =
-    `Current time (UTC): ${new Date().toISOString()}. ` +
     `You are talking to WhatsApp user ${userId}.` +
     (extraContext ? `\n\n${extraContext}` : '');
   // We send the conversation history ourselves (bot-owned memory) and DO NOT pass the
@@ -198,13 +227,14 @@ async function runAgentQuery({ to, from, query, agent }) {
     // agent can answer "what do I have left" completely. Tasks = standing to-dos;
     // reminders = timed to-dos (shown for awareness; the poller actually fires them).
     const openTasks = useHistory ? await getOpenTasks(senderNumber) : [];
+    const pendingReminders = useHistory ? await getPendingReminders(senderNumber) : [];
     let tasksContext = '';
     if (useHistory) {
-      const pendingReminders = await getPendingReminders(senderNumber);
       tasksContext = formatTasksForContext(openTasks);
       if (pendingReminders.length) {
-        tasksContext += '\n\nPending reminders (timed; I will ping them automatically):\n' +
-          pendingReminders.map((r) => `- "${r.text}" at ${new Date(r.dueAt).toISOString().slice(11, 16)} UTC`).join('\n');
+        tasksContext += '\n\nPending reminders (timed; I will ping them automatically) — ' +
+          'cancel by number with [[REMINDER_CANCEL|n]] or all with [[REMINDER_CANCEL|all]]:\n' +
+          pendingReminders.map((r, i) => `${i + 1}. "${r.text}" at ${istTime(r.dueAt)} IST`).join('\n');
       }
     }
 
@@ -233,16 +263,20 @@ async function runAgentQuery({ to, from, query, agent }) {
       agentNow = target; // forward the same query to the specialist
     }
 
-    // Extract + schedule any reminder directives (≤24h), and strip them from the
-    // user-facing text before replying. Long replies are split across messages.
+    // Apply + strip directives, in order. New reminders first (create), then control
+    // actions (cancel reminders / clear tasks / clear chat), then task add/done.
     const afterReminders = await handleAgentReply({ agentText: answer, to, from });
-    // Apply any task-list directives (PA only), mapping [[TASK_DONE|n]] to the injected list.
-    const cleanText = useHistory
-      ? await handleTaskDirectives(afterReminders, senderNumber, openTasks)
-      : afterReminders;
-    await sendReply(reply, cleanText);
-    // Persist the exchange so memory survives restarts (PA conversation only).
-    if (useHistory) await appendExchange(senderNumber, query, cleanText);
+    let contextCleared = false;
+    let text = afterReminders;
+    if (useHistory) {
+      const ctrl = await handleControlDirectives(text, senderNumber, pendingReminders);
+      text = ctrl.text; contextCleared = ctrl.contextCleared;
+      text = await handleTaskDirectives(text, senderNumber, openTasks);
+    }
+    await sendReply(reply, text);
+    // Persist the exchange so memory survives restarts (PA only) — UNLESS the user asked
+    // to clear context (then we start fresh: don't re-save this turn).
+    if (useHistory && !contextCleared) await appendExchange(senderNumber, query, text);
   } catch (err) {
     console.error('[openclaw] agent query failed:', err.response?.status, err.message);
     await reply('Sorry — I couldn’t reach the assistant just now. Please try again in a moment.');

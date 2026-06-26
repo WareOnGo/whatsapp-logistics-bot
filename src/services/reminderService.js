@@ -115,6 +115,26 @@ async function getPendingReminders(senderNumber) {
   }
 }
 
+// Cancel pending reminders. `which` = 'all' or a 1-based index into the pending list
+// (same order as getPendingReminders, which is what the agent sees in context).
+async function cancelPending(senderNumber, which, pendingList) {
+  try {
+    const pending = pendingList || await getPendingReminders(senderNumber);
+    let targets = [];
+    if (which === 'all') targets = pending;
+    else { const i = parseInt(which, 10); if (i >= 1 && i <= pending.length) targets = [pending[i - 1]]; }
+    if (!targets.length) return 0;
+    await prisma.reminder.updateMany({
+      where: { id: { in: targets.map((r) => r.id) }, status: 'pending' },
+      data: { status: 'cancelled' },
+    });
+    return targets.length;
+  } catch (err) {
+    console.error('[reminder] cancel failed:', err.message);
+    return 0;
+  }
+}
+
 let timer = null;
 function startReminderScheduler() {
   if (timer) return timer;
@@ -125,4 +145,4 @@ function startReminderScheduler() {
   return timer;
 }
 
-module.exports = { parseReminders, handleAgentReply, fireDueReminders, startReminderScheduler, getPendingReminders, MAX_MINUTES };
+module.exports = { parseReminders, handleAgentReply, fireDueReminders, startReminderScheduler, getPendingReminders, cancelPending, MAX_MINUTES };

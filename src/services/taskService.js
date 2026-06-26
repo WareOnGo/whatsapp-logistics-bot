@@ -60,4 +60,15 @@ async function handleTaskDirectives(text, senderNumber, openTasks) {
   return cleaned;
 }
 
-module.exports = { getOpenTasks, formatTasksForContext, handleTaskDirectives };
+// Mark all open tasks done (for "clear my tasks"). Returns count cleared.
+async function clearAllTasks(senderNumber) {
+  try {
+    const r = await prisma.task.updateMany({
+      where: { senderNumber, done: false },
+      data: { done: true, doneAt: new Date() },
+    });
+    return r.count;
+  } catch (err) { console.error('[task] clearAll failed:', err.message); return 0; }
+}
+
+module.exports = { getOpenTasks, formatTasksForContext, handleTaskDirectives, clearAllTasks };
