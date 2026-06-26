@@ -14,7 +14,10 @@ const s3 = new S3Client({
   },
 });
 
-async function uploadMediaFromUrl(mediaUrl, contentType) {
+// opts.keyPrefix lets callers segregate objects in the shared bucket — e.g. assistant
+// attachments use "assistant-media/" so an R2 lifecycle rule can expire ONLY those,
+// leaving warehouse photos (no prefix) untouched.
+async function uploadMediaFromUrl(mediaUrl, contentType, opts = {}) {
   try {
     const response = await axios.get(mediaUrl, {
       responseType: 'arraybuffer',
@@ -24,8 +27,9 @@ async function uploadMediaFromUrl(mediaUrl, contentType) {
       },
     });
     const fileBuffer = response.data;
-    const fileExtension = contentType.split('/')[1] || 'bin';
-    const fileName = `media_${Date.now()}.${fileExtension}`;
+    const fileExtension = (contentType.split('/')[1] || 'bin').split(';')[0];
+    const rand = Math.random().toString(36).slice(2, 10);
+    const fileName = `${opts.keyPrefix || ''}media_${Date.now()}_${rand}.${fileExtension}`;
     await s3.send(
       new PutObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME,
@@ -66,4 +70,15 @@ function buildMediaJson(urls) {
   return media;
 }
 
-module.exports = { uploadMediaFromUrl, buildMediaJson };
+// Upload an in-memory buffer (e.g. a cleaned CSV) and return its public URL.
+async function uploadBuffer(buffer, fileName, contentType) {
+  await s3.send(new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Key: fileName,
+    Body: buffer,
+    ContentType: contentType,
+  }));
+  return `${process.env.R2_PUBLIC_URL}/${fileName}`;
+}
+
+module.exports = { uploadMediaFromUrl, uploadBuffer, buildMediaJson };

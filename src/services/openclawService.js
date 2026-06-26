@@ -12,10 +12,11 @@
 
 const axios = require('axios');
 const twilio = require('twilio');
-const { handleAgentReply } = require('./reminderService');
+const { handleAgentReply, getPendingReminders } = require('./reminderService');
 const { getHistory, appendExchange } = require('./conversationService');
 const { getActiveMedia, FRESH_MS } = require('./mediaContextService');
 const { resolveImageDataUri } = require('./mediaService');
+const { getOpenTasks, formatTasksForContext, handleTaskDirectives } = require('./taskService');
 
 // A long-lived pin is auto-attached while fresh; after that, only when the user's message
 // actually refers to it — so we don't re-send a stale attachment on unrelated turns.
@@ -131,12 +132,14 @@ async function sendReply(reply, text) {
 // routes through the configured agent (skills, memory, model), not a raw LLM.
 // `user` (the WhatsApp number) makes the Gateway derive a STABLE per-user session
 // key, so each sender gets their own isolated, persistent conversation memory.
-async function askOpenClaw(prompt, userId, agent = 'main', history = [], media = null) {
+async function askOpenClaw(prompt, userId, agent = 'main', history = [], media = null, extraContext = '') {
   // Give the agent the current time + the user's id so it can compute reminder
   // timing ("in 3h", "at 5pm") and emit a [[REMINDER|minutes=..|text=..]] directive.
+  // `extraContext` carries dynamic per-turn state (e.g. the user's open task list).
   const systemContext =
     `Current time (UTC): ${new Date().toISOString()}. ` +
-    `You are talking to WhatsApp user ${userId}.`;
+    `You are talking to WhatsApp user ${userId}.` +
+    (extraContext ? `\n\n${extraContext}` : '');
   // We send the conversation history ourselves (bot-owned memory) and DO NOT pass the
   // OpenAI `user` field — so OpenClaw uses ONLY the messages we provide. This avoids its
   // fragile Codex session continuity (resets on restart) and any cross-user session bleed.
@@ -174,7 +177,8 @@ async function runAgentQuery({ to, from, query, agent }) {
       "Hi, I'm Ramesh — your WareOnGo assistant. Just message me here. I can:\n" +
       '• set reminders & take notes\n' +
       '• answer warehouse / ops questions\n' +
-      '• draft posts & marketing content (LinkedIn, X, blog, and more)\n\n' +
+      '• draft posts & marketing content (LinkedIn, X, blog, and more)\n' +
+      '• clean up CSV/Excel files — just send one\n\n' +
       "You can keep chatting normally — send 'stop' to switch back to warehouse submissions."
     );
     return;
@@ -190,6 +194,20 @@ async function runAgentQuery({ to, from, query, agent }) {
     // Image bytes are pulled from R2 and base64'd here (only transiently in RAM).
     const media = await resolvePinnedMedia(senderNumber, query);
 
+    // Per-user "what's pending" (PA only): inject open TASKS + pending REMINDERS so the
+    // agent can answer "what do I have left" completely. Tasks = standing to-dos;
+    // reminders = timed to-dos (shown for awareness; the poller actually fires them).
+    const openTasks = useHistory ? await getOpenTasks(senderNumber) : [];
+    let tasksContext = '';
+    if (useHistory) {
+      const pendingReminders = await getPendingReminders(senderNumber);
+      tasksContext = formatTasksForContext(openTasks);
+      if (pendingReminders.length) {
+        tasksContext += '\n\nPending reminders (timed; I will ping them automatically):\n' +
+          pendingReminders.map((r) => `- "${r.text}" at ${new Date(r.dueAt).toISOString().slice(11, 16)} UTC`).join('\n');
+      }
+    }
+
     // Orchestration loop: ask an agent; if it returns a [[ROUTE|agent=X]] directive,
     // forward the ORIGINAL query to X. Hard-bounded against loops:
     //   - MAX_ROUTING_HOPS caps total forwards,
@@ -201,7 +219,7 @@ async function runAgentQuery({ to, from, query, agent }) {
     const visited = new Set([agentNow]);
     let answer = '';
     for (let hop = 0; ; hop++) {
-      answer = await askOpenClaw(query, senderNumber, agentNow, history, media);
+      answer = await askOpenClaw(query, senderNumber, agentNow, history, media, tasksContext);
       if (agentNow !== 'main') break; // only the PA delegates
       const m = answer.match(ROUTE_RE);
       const target = m && m[1].toLowerCase();
@@ -217,7 +235,11 @@ async function runAgentQuery({ to, from, query, agent }) {
 
     // Extract + schedule any reminder directives (≤24h), and strip them from the
     // user-facing text before replying. Long replies are split across messages.
-    const cleanText = handleAgentReply({ agentText: answer, to, from });
+    const afterReminders = await handleAgentReply({ agentText: answer, to, from });
+    // Apply any task-list directives (PA only), mapping [[TASK_DONE|n]] to the injected list.
+    const cleanText = useHistory
+      ? await handleTaskDirectives(afterReminders, senderNumber, openTasks)
+      : afterReminders;
     await sendReply(reply, cleanText);
     // Persist the exchange so memory survives restarts (PA conversation only).
     if (useHistory) await appendExchange(senderNumber, query, cleanText);
@@ -236,11 +258,14 @@ async function handleBotCommandAsync({ to, from, body }) {
   return agent;
 }
 
-// Send a plain WhatsApp message via Twilio REST (for out-of-band notices like
-// voice-transcription errors). `to`/`from` are the inbound To/From.
-function sendWhatsApp(to, from, text) {
+// Send a WhatsApp message via Twilio REST (for out-of-band notices like voice/cleanup
+// results). `to`/`from` are the inbound To/From. Pass mediaUrl to attach a file (e.g. a
+// cleaned CSV hosted on R2).
+function sendWhatsApp(to, from, text, mediaUrl) {
   const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  return client.messages.create({ from: to, to: from, body: text });
+  const msg = { from: to, to: from, body: text };
+  if (mediaUrl) msg.mediaUrl = Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl];
+  return client.messages.create(msg);
 }
 
 module.exports = { isBotCommand, parseCommand, handleBotCommandAsync, runAgentQuery, sendWhatsApp, chunkText };

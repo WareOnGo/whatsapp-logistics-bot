@@ -114,6 +114,8 @@ model VerifiedNumber {
   AgentSession        AgentSession?
   Conversation        Conversation?
   MediaContext        MediaContext?
+  Reminder            Reminder[]
+  Task                Task[]
 }
 
 model Draft {
@@ -135,6 +137,37 @@ model AgentSession {
   verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
 
   @@map("agent_session")
+}
+
+// Per-user task list / scratchpad — standing to-dos the assistant manages (add / list /
+// complete). Distinct from timed Reminders. DB-backed + isolated per sender (FK).
+model Task {
+  id             Int            @id @default(autoincrement())
+  senderNumber   String         @map("sender_number")
+  text           String
+  done           Boolean        @default(false)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  doneAt         DateTime?      @map("done_at")
+  verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
+
+  @@index([senderNumber, done])
+  @@map("task")
+}
+
+// Scheduled reminders (≤24h). Persisted so they survive bot restarts/redeploys: a
+// background poller fires due ones via Twilio and marks them. Keyed by sender (FK).
+model Reminder {
+  id             Int            @id @default(autoincrement())
+  senderNumber   String         @map("sender_number") // recipient (rep)
+  fromNumber     String         @map("from_number")   // bot's WhatsApp number to send from
+  text           String
+  dueAt          DateTime       @map("due_at")
+  status         String         @default("pending") // pending | sent | failed | missed
+  createdAt      DateTime       @default(now()) @map("created_at")
+  verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
+
+  @@index([status, dueAt])
+  @@map("reminder")
 }
 
 // Active media attachment ("pin") per user. Image bytes live in R2 (r2Url); PDF/doc text

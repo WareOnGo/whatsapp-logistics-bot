@@ -9,8 +9,9 @@ const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageServi
 const { parseCommand, handleBotCommandAsync, runAgentQuery, sendWhatsApp } = require('../services/openclawService');
 const { getActiveSession, startSession, endSession, isExitCommand } = require('../services/sessionService');
 const { isVoiceNote, transcribe } = require('../services/voiceService');
-const { classify, prepareMedia } = require('../services/mediaService');
+const { classify, prepareMedia, fetchTwilioMedia } = require('../services/mediaService');
 const { setActiveMedia } = require('../services/mediaContextService');
+const { cleanFile } = require('../services/dataCleanupService');
 
 const TWENTY_BASE_URL = process.env.TWENTY_BASE_URL;
 const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
@@ -66,11 +67,42 @@ router.post('/', async (req, res) => {
     return;
   }
 
+  // Step 1a.1: spreadsheet (CSV/XLSX) in an assistant session -> data cleanup. Parse →
+  // agent emits a cleanup spec → deterministic executor applies it → reply with summary +
+  // the cleaned file. Gated on an active session so it never disrupts warehouse ingestion.
+  if (numMedia > 0 && ['csv', 'xlsx'].includes(classify(contentType, req.body.MediaUrl0))) {
+    const dcSession = await getActiveSession(senderNumber);
+    const dcDraft = await prisma.draft.findUnique({ where: { senderNumber } });
+    if (dcSession && !dcDraft) {
+      ackEmpty();
+      (async () => {
+        try {
+          await sendWhatsApp(req.body.To, req.body.From, '📄 Got your file — cleaning it up, one moment…');
+          const kind = classify(contentType, req.body.MediaUrl0);
+          const buf = await fetchTwilioMedia(req.body.MediaUrl0);
+          const r = await cleanFile(buf, kind === 'xlsx' ? 'xlsx' : 'csv', messageBody.trim());
+          await startSession(senderNumber, dcSession.agent); // refresh window
+          if (!r.ok) {
+            await sendWhatsApp(req.body.To, req.body.From, `Sorry — ${r.error}.`);
+            return;
+          }
+          await sendWhatsApp(req.body.To, req.body.From, `${r.summaryText}\n\nHere's the cleaned file:`, r.r2Url);
+        } catch (e) {
+          console.error('[datacleanup] failed:', e.message);
+          await sendWhatsApp(req.body.To, req.body.From, "Sorry — I couldn't clean that file just now. Please try again.").catch(() => {});
+        }
+      })();
+      return;
+    }
+    // not in a session -> fall through (a stray spreadsheet isn't warehouse ingestion either,
+    // but we leave existing behaviour untouched).
+  }
+
   // Step 1a.2: image / PDF / doc -> attach to the assistant — but ONLY when the user is
   // in an assistant session (so warehouse photos still go to ingestion). The attachment
   // is buffered and re-attached to follow-up questions (context pinning). With a caption,
   // we answer now; without one, we ack and wait for the question.
-  if (numMedia > 0 && ['image', 'pdf', 'doc'].includes(classify(contentType))) {
+  if (numMedia > 0 && ['image', 'pdf', 'doc'].includes(classify(contentType, req.body.MediaUrl0))) {
     const mediaSession = await getActiveSession(senderNumber);
     const mediaDraft = await prisma.draft.findUnique({ where: { senderNumber } });
     if (mediaSession && !mediaDraft) {
