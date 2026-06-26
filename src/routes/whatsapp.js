@@ -6,7 +6,9 @@ const axios = require('axios');
 const parseWarehouseData = require('../utils/warehouseParser');
 const { deriveZone, saveWarehouse, logMessage, isVerifiedNumber } = require('../services/warehouseService');
 const { uploadMediaFromUrl, buildMediaJson } = require('../services/storageService');
-const { isBotCommand, handleBotCommandAsync } = require('../services/openclawService');
+const { parseCommand, handleBotCommandAsync, runAgentQuery, sendWhatsApp } = require('../services/openclawService');
+const { getActiveSession, startSession, endSession, isExitCommand } = require('../services/sessionService');
+const { isVoiceNote, transcribe } = require('../services/voiceService');
 
 const TWENTY_BASE_URL = process.env.TWENTY_BASE_URL;
 const TWENTY_RFQ_URL = `${TWENTY_BASE_URL}/rfq`;
@@ -32,14 +34,83 @@ router.post('/', async (req, res) => {
     return;
   }
 
-  // Step 1b: Route `/bot ...` to the OpenClaw agent. Ack Twilio immediately, then
-  // run the agent + reply via Twilio REST in the background (not awaited).
-  if (isBotCommand(messageBody)) {
+  // --- OpenClaw assistant routing (sticky 48h sessions) ---
+  const ackEmpty = () => { res.writeHead(200, { 'Content-Type': 'text/xml' }); res.end('<Response/>'); };
+
+  // Step 1a: voice note -> transcribe -> treat the transcript as an assistant query.
+  // Voice is conversational input (not warehouse data), so it goes to the assistant:
+  // the active sticky agent if any, else the ops PA. Ack Twilio first; work async.
+  if (isVoiceNote(req.body)) {
+    ackEmpty();
+    (async () => {
+      try {
+        const text = await transcribe(req.body.MediaUrl0, contentType);
+        if (!text) {
+          await sendWhatsApp(req.body.To, req.body.From, "I couldn't make out that voice note — could you try again or type it?");
+          return;
+        }
+        const session = await getActiveSession(senderNumber);
+        const agent = session ? session.agent : 'main';
+        if (session) await startSession(senderNumber, agent); // refresh the 48h window
+        // Show what was heard (transcription isn't perfect), then answer.
+        await sendWhatsApp(req.body.To, req.body.From, `🎤 "${text}"`);
+        await runAgentQuery({ to: req.body.To, from: req.body.From, query: text, agent });
+      } catch (e) {
+        console.error('[voice] transcription/handler failed:', e.message);
+        await sendWhatsApp(req.body.To, req.body.From, "Sorry — I couldn't process that voice note just now. Please try again.")
+          .catch(() => {});
+      }
+    })();
+    return;
+  }
+
+  // Step 1b: exit the assistant -> back to warehouse-submission mode.
+  if (isExitCommand(messageBody)) {
+    const ended = await endSession(senderNumber);
     res.writeHead(200, { 'Content-Type': 'text/xml' });
-    res.end('<Response/>');
+    twiml.message(ended
+      ? '✅ Back to warehouse submission mode. Send /bot or /content to chat with the assistant again.'
+      : "You're in warehouse submission mode. Send /bot or /content to chat with the assistant.");
+    res.end(twiml.toString());
+    return;
+  }
+
+  // Step 1c: explicit /bot or /content -> start/refresh a sticky session, then run.
+  // Don't enter assistant mode mid warehouse-submission (ingestion keeps priority).
+  const parsedCmd = parseCommand(messageBody);
+  if (parsedCmd) {
+    const draft = await prisma.draft.findUnique({ where: { senderNumber } });
+    if (draft) {
+      res.writeHead(200, { 'Content-Type': 'text/xml' });
+      twiml.message('You have a warehouse submission in progress. Send `close` to finish it first, then use /bot or /content.');
+      res.end(twiml.toString());
+      return;
+    }
+    // Only `/bot` (the PA) starts a sticky 48h session. `/content` (and other
+    // specialist prefixes) are ONE-SHOT — run this single message, don't trap the
+    // user in that agent. Any existing /bot session is left untouched.
+    if (parsedCmd.agent === 'main') {
+      await startSession(senderNumber, 'main');
+    }
+    ackEmpty();
     handleBotCommandAsync({ to: req.body.To, from: req.body.From, body: messageBody })
       .catch((e) => console.error('[openclaw] async handler error:', e.message));
     return;
+  }
+
+  // Step 1d: sticky session active (no prefix needed). Route plain messages to the
+  // active agent and refresh the 48h window — UNLESS a warehouse submission is in
+  // progress, in which case ingestion takes priority (fall through).
+  const session = await getActiveSession(senderNumber);
+  if (session) {
+    const draft = await prisma.draft.findUnique({ where: { senderNumber } });
+    if (!draft) {
+      await startSession(senderNumber, session.agent); // refresh expiry
+      ackEmpty();
+      runAgentQuery({ to: req.body.To, from: req.body.From, query: messageBody, agent: session.agent })
+        .catch((e) => console.error('[openclaw] async handler error:', e.message));
+      return;
+    }
   }
 
   // Step 2: Check for an active draft and handle expiration

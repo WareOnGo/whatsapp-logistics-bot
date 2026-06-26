@@ -116,21 +116,21 @@ async function askOpenClaw(prompt, userId, agent = 'main') { // agent: which Ope
   return resp.data?.choices?.[0]?.message?.content?.trim() || '(no response)';
 }
 
-// Fire-and-forget: the caller has already returned 200 to Twilio. We run the
-// agent and then push the answer back inside the open 24-hour window (free,
-// no template). `from`/`to` come from the inbound webhook, so no extra number var.
-async function handleBotCommandAsync({ to, from, body }) {
+// Core: run one query against `agent`, handle PA front-door routing + reminders, and
+// reply (split across messages if long). Fire-and-forget — caller already 200'd Twilio.
+// Used both by the /bot|/content prefix path and the sticky-session path.
+async function runAgentQuery({ to, from, query, agent }) {
   const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   // Reply goes FROM the bot's number (inbound `To`) back TO the rep (inbound `From`).
   const reply = (text) => client.messages.create({ from: to, to: from, body: text });
 
-  const parsed = parseCommand(body);
-  const { agent, query } = parsed || { agent: 'main', query: '' };
   if (!query || query.toLowerCase() === 'help') {
     await reply(
       'Commands:\n' +
-      '`/bot <question>` — ops assistant (reminders, notes, warehouse Q&A)\n' +
-      '`/content <seed>` — content engine (LinkedIn/X/blog/Reddit drafts in WareOnGo voice)'
+      '`/bot <question>` — ops assistant (reminders, notes, warehouse Q&A). Starts a chat: ' +
+      'for 48h you can keep messaging with no prefix. It also drafts content when you ask. ' +
+      'Send `/stop` to exit.\n' +
+      '`/content <seed>` — one-off content draft (LinkedIn/X/blog/Reddit in WareOnGo voice).'
     );
     return;
   }
@@ -167,9 +167,25 @@ async function handleBotCommandAsync({ to, from, body }) {
     const cleanText = handleAgentReply({ agentText: answer, to, from });
     await sendReply(reply, cleanText);
   } catch (err) {
-    console.error('[openclaw] bot command failed:', err.response?.status, err.message);
+    console.error('[openclaw] agent query failed:', err.response?.status, err.message);
     await reply('Sorry — I couldn’t reach the assistant just now. Please try again in a moment.');
   }
 }
 
-module.exports = { isBotCommand, handleBotCommandAsync, chunkText };
+// Prefix path: parse `/bot ...` or `/content ...` and run it. Returns the resolved
+// agent so the caller (webhook) can start/refresh the sticky session for it.
+async function handleBotCommandAsync({ to, from, body }) {
+  const parsed = parseCommand(body);
+  const { agent, query } = parsed || { agent: 'main', query: '' };
+  await runAgentQuery({ to, from, query, agent });
+  return agent;
+}
+
+// Send a plain WhatsApp message via Twilio REST (for out-of-band notices like
+// voice-transcription errors). `to`/`from` are the inbound To/From.
+function sendWhatsApp(to, from, text) {
+  const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  return client.messages.create({ from: to, to: from, body: text });
+}
+
+module.exports = { isBotCommand, parseCommand, handleBotCommandAsync, runAgentQuery, sendWhatsApp, chunkText };
