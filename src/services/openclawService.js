@@ -13,6 +13,7 @@
 const axios = require('axios');
 const twilio = require('twilio');
 const { handleAgentReply } = require('./reminderService');
+const { getHistory, appendExchange } = require('./conversationService');
 
 const OPENCLAW_URL = process.env.OPENCLAW_URL;
 const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN;
@@ -89,19 +90,22 @@ async function sendReply(reply, text) {
 // routes through the configured agent (skills, memory, model), not a raw LLM.
 // `user` (the WhatsApp number) makes the Gateway derive a STABLE per-user session
 // key, so each sender gets their own isolated, persistent conversation memory.
-async function askOpenClaw(prompt, userId, agent = 'main') { // agent: which OpenClaw agent to target
+async function askOpenClaw(prompt, userId, agent = 'main', history = []) {
   // Give the agent the current time + the user's id so it can compute reminder
   // timing ("in 3h", "at 5pm") and emit a [[REMINDER|minutes=..|text=..]] directive.
   const systemContext =
     `Current time (UTC): ${new Date().toISOString()}. ` +
     `You are talking to WhatsApp user ${userId}.`;
+  // We send the conversation history ourselves (bot-owned memory) and DO NOT pass the
+  // OpenAI `user` field — so OpenClaw uses ONLY the messages we provide. This avoids its
+  // fragile Codex session continuity (resets on restart) and any cross-user session bleed.
   const resp = await axios.post(
     `${OPENCLAW_URL}/v1/chat/completions`,
     {
       model: `openclaw/${agent}`,
-      user: userId,
       messages: [
         { role: 'system', content: systemContext },
+        ...history,
         { role: 'user', content: prompt },
       ],
     },
@@ -136,7 +140,12 @@ async function runAgentQuery({ to, from, query, agent }) {
   }
 
   try {
-    // `from` is the rep's WhatsApp number — stable per-user session key.
+    const senderNumber = (from || '').replace('whatsapp:', '').trim();
+    // Bot-owned memory: only the PA ("main") carries conversation history. Specialist
+    // one-shots (/content) run statelessly.
+    const useHistory = agent === 'main';
+    const history = useHistory ? await getHistory(senderNumber) : [];
+
     // Orchestration loop: ask an agent; if it returns a [[ROUTE|agent=X]] directive,
     // forward the ORIGINAL query to X. Hard-bounded against loops:
     //   - MAX_ROUTING_HOPS caps total forwards,
@@ -148,7 +157,7 @@ async function runAgentQuery({ to, from, query, agent }) {
     const visited = new Set([agentNow]);
     let answer = '';
     for (let hop = 0; ; hop++) {
-      answer = await askOpenClaw(query, from, agentNow);
+      answer = await askOpenClaw(query, senderNumber, agentNow, history);
       if (agentNow !== 'main') break; // only the PA delegates
       const m = answer.match(ROUTE_RE);
       const target = m && m[1].toLowerCase();
@@ -166,6 +175,8 @@ async function runAgentQuery({ to, from, query, agent }) {
     // user-facing text before replying. Long replies are split across messages.
     const cleanText = handleAgentReply({ agentText: answer, to, from });
     await sendReply(reply, cleanText);
+    // Persist the exchange so memory survives restarts (PA conversation only).
+    if (useHistory) await appendExchange(senderNumber, query, cleanText);
   } catch (err) {
     console.error('[openclaw] agent query failed:', err.response?.status, err.message);
     await reply('Sorry — I couldn’t reach the assistant just now. Please try again in a moment.');

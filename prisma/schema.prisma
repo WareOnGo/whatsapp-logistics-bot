@@ -112,6 +112,7 @@ model VerifiedNumber {
   reviewerAccess      Boolean   @default(false)
   Employee            Employee?
   AgentSession        AgentSession?
+  Conversation        Conversation?
 }
 
 model Draft {
@@ -133,6 +134,18 @@ model AgentSession {
   verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
 
   @@map("agent_session")
+}
+
+// Bot-owned conversation history per user. The bot sends these turns to OpenClaw on
+// each call so memory is deterministic (survives gateway/bot restarts) and isolated
+// (keyed by sender — never shared across users). Capped to the most recent turns.
+model Conversation {
+  senderNumber   String         @id @map("sender_number")
+  turns          Json // [{ role: "user"|"assistant", content: "..." }], most-recent-last
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  verifiedNumber VerifiedNumber @relation(fields: [senderNumber], references: [phoneNumber], onDelete: Cascade)
+
+  @@map("conversation")
 }
 
 model WarehouseData {
