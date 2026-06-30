@@ -17,6 +17,9 @@ const { getHistory, appendExchange, clearHistory } = require('./conversationServ
 const { getActiveMedia, FRESH_MS } = require('./mediaContextService');
 const { resolveImageDataUri } = require('./mediaService');
 const { getOpenTasks, formatTasksForContext, handleTaskDirectives, clearAllTasks } = require('./taskService');
+const {
+  runNamedQuery, parseDataDirectives, stripDataDirectives, formatResult, QUERY_NAMES,
+} = require('./dbReadService');
 
 // Control directives the agent emits to ACTUALLY perform destructive/clear actions —
 // so it can never just claim "done" without the bot doing it. Stripped before reply.
@@ -160,7 +163,7 @@ async function sendReply(reply, text) {
 // routes through the configured agent (skills, memory, model), not a raw LLM.
 // `user` (the WhatsApp number) makes the Gateway derive a STABLE per-user session
 // key, so each sender gets their own isolated, persistent conversation memory.
-async function askOpenClaw(prompt, userId, agent = 'main', history = [], media = null, extraContext = '') {
+async function askOpenClaw(prompt, userId, agent = 'main', history = [], media = null, extraContext = '', followups = []) {
   // Give the agent the current time + the user's id so it can compute reminder
   // timing ("in 3h", "at 5pm") and emit a [[REMINDER|minutes=..|text=..]] directive.
   // `extraContext` carries dynamic per-turn state (e.g. the user's open task list).
@@ -176,10 +179,13 @@ async function askOpenClaw(prompt, userId, agent = 'main', history = [], media =
     `${OPENCLAW_URL}/v1/chat/completions`,
     {
       model: `openclaw/${agent}`,
+      // `followups` are internal tool turns (e.g. DATA RESULTS fed back so the agent can
+      // answer from real rows). They are NOT persisted to conversation history.
       messages: [
         { role: 'system', content: systemContext },
         ...history,
         { role: 'user', content: buildUserContent(prompt, media) },
+        ...followups,
       ],
     },
     {
@@ -191,6 +197,44 @@ async function askOpenClaw(prompt, userId, agent = 'main', history = [], media =
     }
   );
   return resp.data?.choices?.[0]?.message?.content?.trim() || '(no response)';
+}
+
+// Read-only DB lookups: the PA emits [[DATA|q=<named>|param=value|...]] when it needs
+// real warehouse data. We run the canned query (read-only role, fixed columns — never
+// owner contact), feed the rows back as an internal turn, and let the agent answer from
+// them. Bounded loop so the agent can chain a couple of lookups but can't spin forever.
+// Only the PA ("main") gets DB access; specialist agents (e.g. content) do not.
+const MAX_DATA_HOPS = 3;
+const DATA_REPLY_PREFIX =
+  'DATA RESULTS for your lookup(s). Use ONLY these rows to answer. Do NOT show the raw ' +
+  'JSON, the [[DATA|...]] directive, or row ids unless the user asked for an id. If a ' +
+  'result is empty, say so plainly. Never invent rows.\n\n';
+
+async function askAgentWithData(query, senderNumber, agentNow, history, media, tasksContext) {
+  // Non-PA agents have no DB access: single call, strip any stray directive.
+  if (agentNow !== 'main') {
+    return stripDataDirectives(await askOpenClaw(query, senderNumber, agentNow, history, media, tasksContext));
+  }
+  const followups = [];
+  let answer = '';
+  for (let dhop = 0; ; dhop++) {
+    answer = await askOpenClaw(query, senderNumber, agentNow, history, media, tasksContext, followups);
+    const directives = parseDataDirectives(answer);
+    if (!directives.length) return answer;            // agent answered (or routed) — done
+    if (dhop >= MAX_DATA_HOPS) {                       // safety: stop fetching, strip + return
+      console.warn(`[openclaw] data hop cap (${MAX_DATA_HOPS}) hit; stopping lookups`);
+      return stripDataDirectives(answer);
+    }
+    const results = [];
+    for (const d of directives) {
+      const r = await runNamedQuery(d.name, d.args);
+      console.log(`[openclaw] DATA ${d.name}(${JSON.stringify(d.args)}) -> ${r.ok ? r.rowCount + ' rows' : 'ERR ' + r.error}`);
+      results.push(formatResult(d.name, d.args, r));
+    }
+    // Replay the agent's directive turn + the results, then ask again.
+    followups.push({ role: 'assistant', content: answer });
+    followups.push({ role: 'user', content: DATA_REPLY_PREFIX + results.join('\n\n') });
+  }
 }
 
 // Core: run one query against `agent`, handle PA front-door routing + reminders, and
@@ -249,7 +293,8 @@ async function runAgentQuery({ to, from, query, agent }) {
     const visited = new Set([agentNow]);
     let answer = '';
     for (let hop = 0; ; hop++) {
-      answer = await askOpenClaw(query, senderNumber, agentNow, history, media, tasksContext);
+      // askAgentWithData resolves any [[DATA|..]] lookups for the PA before returning.
+      answer = await askAgentWithData(query, senderNumber, agentNow, history, media, tasksContext);
       if (agentNow !== 'main') break; // only the PA delegates
       const m = answer.match(ROUTE_RE);
       const target = m && m[1].toLowerCase();
@@ -273,6 +318,7 @@ async function runAgentQuery({ to, from, query, agent }) {
       text = ctrl.text; contextCleared = ctrl.contextCleared;
       text = await handleTaskDirectives(text, senderNumber, openTasks);
     }
+    text = stripDataDirectives(text); // belt-and-suspenders: never leak a lookup directive
     await sendReply(reply, text);
     // Persist the exchange so memory survives restarts (PA only) — UNLESS the user asked
     // to clear context (then we start fresh: don't re-save this turn).

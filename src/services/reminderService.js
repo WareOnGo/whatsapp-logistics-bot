@@ -125,7 +125,9 @@ async function cancelPending(senderNumber, which, pendingList) {
     else { const i = parseInt(which, 10); if (i >= 1 && i <= pending.length) targets = [pending[i - 1]]; }
     if (!targets.length) return 0;
     await prisma.reminder.updateMany({
-      where: { id: { in: targets.map((r) => r.id) }, status: 'pending' },
+      // senderNumber guard = defense in depth: only ever this user's rows, even if a wrong
+      // id list were ever passed in.
+      where: { id: { in: targets.map((r) => r.id) }, senderNumber, status: 'pending' },
       data: { status: 'cancelled' },
     });
     return targets.length;
