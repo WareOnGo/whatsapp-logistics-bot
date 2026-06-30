@@ -50,10 +50,6 @@ function clampInt(v, dflt, min, max) {
   if (!Number.isInteger(n)) return dflt;
   return Math.min(max, Math.max(min, n));
 }
-function truthy(v) {
-  return v === true || /^(true|yes|y|1)$/i.test(String(v || ''));
-}
-
 // City data is dirty (Bengaluru vs Bangalore, Gurgaon vs Gurugram, ...). Expand a
 // user-supplied city to its known aliases and match any of them via ILIKE.
 const CITY_ALIASES = {
@@ -70,22 +66,70 @@ function cityPatterns(city) {
   return names.map((n) => `%${n}%`);
 }
 
+// Composable WHERE-builder for warehouse filters. Each method appends one condition plus
+// its positional bind params. Fuzziness is built in where it actually helps (pg_trgm is
+// installed — GIN trgm indexes on address + compliances):
+//   - city():     alias expansion (Bengaluru<->Bangalore, Gurgaon<->Gurugram, ...) PLUS
+//                 trigram similarity, so typos like "banglore" still match.
+//   - locality(): substring ILIKE on address (trgm-indexed) PLUS word-similarity (<%), so
+//                 "whitfield"/"bhiwndi" still hit the right area/neighbourhood.
+//   - ilike():    case-insensitive contains (data is mixed-case: PEB/peb, EAST/South...).
+function makeFilter() {
+  const vals = [];
+  const where = [];
+  return {
+    vals,
+    where,
+    city(v) {
+      const raw = (v == null ? '' : String(v)).trim();
+      if (!raw) return;
+      vals.push(cityPatterns(raw)); const a = vals.length;
+      vals.push(raw); const b = vals.length;
+      where.push(`(city ILIKE ANY($${a}) OR similarity(city, $${b}) > 0.4)`);
+    },
+    locality(v) {
+      const raw = (v == null ? '' : String(v)).trim();
+      if (!raw) return;
+      vals.push(`%${raw}%`); const a = vals.length;
+      vals.push(raw); const b = vals.length;
+      where.push(`(address ILIKE $${a} OR $${b} <% address)`);
+    },
+    ilike(col, v) {
+      const raw = (v == null ? '' : String(v)).trim();
+      if (!raw) return;
+      vals.push(`%${raw}%`);
+      where.push(`${col} ILIKE $${vals.length}`);
+    },
+    arrCmp(col, v, op) {
+      if (v == null || !Number.isFinite(+v)) return;
+      vals.push(parseInt(v, 10));
+      where.push(`EXISTS (SELECT 1 FROM unnest(${col}) s WHERE s ${op} $${vals.length})`);
+    },
+    raw(clause) { where.push(clause); },
+    sql() { return where.length ? 'WHERE ' + where.join(' AND ') : ''; },
+  };
+}
+
 // ---- named query registry --------------------------------------------------
 // Each entry: build(args) -> { sql, values }. `desc` is surfaced to the agent so it
 // knows what it can ask for and with which params.
 const QUERIES = {
   warehouses_by_city: {
-    desc: 'List warehouses in a city. Params: city (required), limit (optional, 1-25).',
+    desc: 'List warehouses in a city (fuzzy: handles Bengaluru/Bangalore aliases + typos). ' +
+      'Params: city (required), limit (optional, 1-25).',
     build(a) {
+      const f = makeFilter();
+      f.city(reqStr(a.city, 'city'));
       const limit = clampInt(a.limit, 10, 1, 25);
+      f.vals.push(limit);
       return {
-        sql: `SELECT id, city, zone, "warehouseType" AS type, "ratePerSqft" AS rate,
-                     "totalSpaceSqft" AS sqft, availability, "wogVerified" AS verified
-                FROM "Warehouse"
-               WHERE city ILIKE ANY($1)
-            ORDER BY "wogVerified" DESC NULLS LAST, id DESC
-               LIMIT $2`,
-        values: [cityPatterns(reqStr(a.city, 'city')), limit],
+        sql: `SELECT id, city, state, zone, address, "warehouseType" AS type, "ratePerSqft" AS rate,
+                     "totalSpaceSqft" AS sqft, availability,
+                     count(*) OVER()::int AS _total
+                FROM "Warehouse" ${f.sql()}
+            ORDER BY id DESC
+               LIMIT $${f.vals.length}`,
+        values: f.vals,
       };
     },
   },
@@ -99,51 +143,47 @@ const QUERIES = {
         sql: `SELECT w.id, w.city, w.state, w.zone, w.address, w."warehouseType" AS type,
                      w."ratePerSqft" AS rate, w."totalSpaceSqft" AS sqft, w."offeredSpaceSqft" AS offered_sqft,
                      w."clearHeightFt" AS clear_height_ft, w."numberOfDocks" AS docks, w.compliances,
-                     w.availability, w.status, w."wogVerified" AS verified,
+                     w.availability, w.status,
                      wd.latitude, wd.longitude, wd."powerKva" AS power_kva,
                      wd."landType" AS land_type, wd."fireNocAvailable" AS fire_noc
                 FROM "Warehouse" w
            LEFT JOIN "WarehouseData" wd ON wd."warehouseId" = w.id
                WHERE w.id = $1
                LIMIT 1`,
+        // (wogVerified intentionally omitted — not an actively maintained column right now)
         values: [reqInt(a.id, 'id')],
       };
     },
   },
 
   warehouses_search: {
-    desc: 'Filter warehouses. Optional params: city, type (PEB/RCC/Shed/BTS), min_sqft (int), ' +
-      'available (yes/no), verified (true/false), limit (1-25). At least one filter recommended.',
+    desc: 'Filter warehouses — ALL params optional, combine freely (fuzzy on city/locality). Params: ' +
+      'city, locality (area/neighbourhood, e.g. Whitefield/Bhiwandi — fuzzy), state, ' +
+      'zone (North/South/East/West/Central), type (PEB/RCC/Shed/BTS), min_sqft, max_sqft, ' +
+      'available (yes/no), status (e.g. "ready to move"), compliance (keyword, e.g. fire/CLU), ' +
+      'limit (1-25).',
     build(a) {
-      const vals = [];
-      const where = [];
-      if (a.city != null && String(a.city).trim()) {
-        vals.push(cityPatterns(String(a.city)));
-        where.push(`city ILIKE ANY($${vals.length})`);
-      }
-      if (a.type != null && String(a.type).trim()) {
-        vals.push(`%${String(a.type).trim()}%`);
-        where.push(`"warehouseType" ILIKE $${vals.length}`);
-      }
-      if (a.available != null && String(a.available).trim()) {
-        vals.push(`${String(a.available).trim()}%`);
-        where.push(`availability ILIKE $${vals.length}`);
-      }
-      if (truthy(a.verified)) where.push(`"wogVerified" = true`);
-      if (a.min_sqft != null && Number.isFinite(+a.min_sqft)) {
-        vals.push(parseInt(a.min_sqft, 10));
-        where.push(`EXISTS (SELECT 1 FROM unnest("totalSpaceSqft") s WHERE s >= $${vals.length})`);
-      }
+      const f = makeFilter();
+      f.city(a.city);
+      f.locality(a.locality);
+      f.ilike('state', a.state);
+      f.ilike('zone', a.zone);
+      f.ilike('"warehouseType"', a.type);
+      f.ilike('availability', a.available);
+      f.ilike('status', a.status);
+      f.ilike('compliances', a.compliance);
+      f.arrCmp('"totalSpaceSqft"', a.min_sqft, '>=');
+      f.arrCmp('"totalSpaceSqft"', a.max_sqft, '<=');
       const limit = clampInt(a.limit, 15, 1, 25);
-      vals.push(limit);
-      const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+      f.vals.push(limit);
       return {
-        sql: `SELECT id, city, zone, "warehouseType" AS type, "ratePerSqft" AS rate,
-                     "totalSpaceSqft" AS sqft, availability, "wogVerified" AS verified
-                FROM "Warehouse" ${whereSql}
-            ORDER BY "wogVerified" DESC NULLS LAST, id DESC
-               LIMIT $${vals.length}`,
-        values: vals,
+        sql: `SELECT id, city, state, zone, address, "warehouseType" AS type, "ratePerSqft" AS rate,
+                     "totalSpaceSqft" AS sqft, availability, status,
+                     count(*) OVER()::int AS _total
+                FROM "Warehouse" ${f.sql()}
+            ORDER BY id DESC
+               LIMIT $${f.vals.length}`,
+        values: f.vals,
       };
     },
   },
@@ -153,10 +193,9 @@ const QUERIES = {
       'are summed). Params: city (optional). Use this for "how many in X".',
     build(a) {
       if (a.city != null && String(a.city).trim()) {
-        return {
-          sql: `SELECT count(*)::int AS n FROM "Warehouse" WHERE city ILIKE ANY($1)`,
-          values: [cityPatterns(String(a.city))],
-        };
+        const f = makeFilter();
+        f.city(a.city); // alias + fuzzy, same as the list queries
+        return { sql: `SELECT count(*)::int AS n FROM "Warehouse" ${f.sql()}`, values: f.vals };
       }
       return { sql: `SELECT count(*)::int AS n FROM "Warehouse"`, values: [] };
     },
@@ -228,11 +267,23 @@ function stripDataDirectives(text) {
 }
 
 // Compact, model-readable rendering of a query result for re-injection into context.
+// List queries carry a `_total` column (count(*) OVER() — full match count before LIMIT);
+// we surface it in the header so the agent can say "showing 10 of 47" and strip it from
+// the rows so it isn't mistaken for warehouse data.
 function formatResult(name, args, result) {
   const head = `DATA RESULT — ${name}(${JSON.stringify(args)})`;
   if (!result.ok) return `${head}: ERROR — ${result.error}`;
   if (!result.rows.length) return `${head}: 0 rows found.`;
-  return `${head}: ${result.rows.length} row(s)\n\`\`\`json\n${JSON.stringify(result.rows)}\n\`\`\``;
+  let rows = result.rows;
+  let note = `${rows.length} row(s)`;
+  if (rows[0] && rows[0]._total !== undefined) {
+    const total = rows[0]._total;
+    rows = rows.map(({ _total, ...rest }) => rest);
+    note = total > rows.length
+      ? `showing ${rows.length} of ${total} total matches — MORE EXIST; tell the user the total and offer to narrow or show more`
+      : `${rows.length} match(es) — this is ALL of them`;
+  }
+  return `${head}: ${note}\n\`\`\`json\n${JSON.stringify(rows)}\n\`\`\``;
 }
 
 module.exports = {
