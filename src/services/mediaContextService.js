@@ -9,8 +9,7 @@
 // attached while FRESH (first FRESH_MS) or when the user's message references it — so a
 // long-lived pin doesn't get wastefully re-sent on unrelated turns.
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const PIN_TTL_MS = 2 * 60 * 60 * 1000; // pin available for 2 hours
 const FRESH_MS = 15 * 60 * 1000;       // auto-attach without a cue for the first 15 min

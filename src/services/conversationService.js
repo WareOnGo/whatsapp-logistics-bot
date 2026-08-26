@@ -9,8 +9,7 @@
 // Capped to the most recent turns to bound tokens. DB errors degrade to "no history"
 // rather than breaking the webhook.
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Caps to keep re-sent context small. The biggest per-call cost is OpenClaw's own base
 // agent context (skills + AGENTS.md + references), so history just needs to be enough for

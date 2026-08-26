@@ -1,7 +1,6 @@
 // services/warehouseService.js
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function deriveZone(state) {
   const s = state.toLowerCase().trim();

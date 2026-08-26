@@ -7,8 +7,7 @@
 //   [[TASK_DONE|2]]                 -> complete the 2nd open task (as numbered in context)
 // DB-backed + isolated per sender (FK to VerifiedNumber).
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const MAX_OPEN = 50; // safety cap on open tasks shown/kept per user
 

@@ -9,8 +9,7 @@
 // user as having no active session (falls back to prefix-required behaviour) rather
 // than breaking the webhook.
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const SESSION_HOURS = 48;
 const EXIT_COMMANDS = new Set(['/stop', '/exit', '/done', '/warehouse', 'stop', 'exit']);

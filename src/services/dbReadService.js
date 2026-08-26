@@ -286,7 +286,17 @@ function formatResult(name, args, result) {
   return `${head}: ${note}\n\`\`\`json\n${JSON.stringify(rows)}\n\`\`\``;
 }
 
+// Release the pool on shutdown so a redeploy doesn't strand connections on the
+// Supabase pooler until they time out server-side.
+async function closePool() {
+  if (!pool) return;
+  const p = pool;
+  pool = null;
+  await p.end().catch((e) => console.error('[dbread] pool close failed:', e.message));
+}
+
 module.exports = {
+  closePool,
   runNamedQuery,
   hasDataDirective,
   parseDataDirectives,

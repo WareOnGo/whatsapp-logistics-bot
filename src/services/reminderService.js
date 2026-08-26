@@ -10,8 +10,7 @@
 //   [[REMINDER|minutes=180|text=call the Bhiwandi warehouse owner]]
 
 const twilio = require('twilio');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const DIRECTIVE_RE = /\[\[REMINDER\|minutes=(\d+)\|text=([^\]]+)\]\]/gi;
 const MAX_MINUTES = 24 * 60;          // WhatsApp free service window
