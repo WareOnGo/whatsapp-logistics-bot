@@ -89,144 +89,10 @@ describe('WhatsApp Webhook Integration Tests', () => {
       });
     });
 
-    describe('Verified Numbers - New Submission', () => {
-      beforeEach(() => {
-        mockPrismaInstance.verifiedNumber.findFirst.mockResolvedValue({
-          id: 1,
-          phoneNumber: '+918076708542',
-          isActive: true,
-        });
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(null);
-      });
-
-      test('should handle submission with mediaAvailable=n (immediate save)', async () => {
-        mockPrismaInstance.warehouse.create.mockResolvedValue({ id: 100 });
-        mockPrismaInstance.warehouseData.create.mockResolvedValue({ id: 200 });
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: `Warehouse Owner Type: company
-Media Available: n
-Warehouse Type: PEB
-Address: Test Address
-City: Bangalore
-State: Karnataka
-Postal Code: 562149
-Contact Person: Test
-Contact Number: 9845226666
-Total Space: 50000 sqft
-Fire NOC Available: Y
-Fire Safety Measures: Hydrants
-Compliances: Test
-Rate Per Sqft: 40
-Is Broker (y/n)?: n
-Uploaded by: Test`,
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('Success');
-        expect(response.text).toContain('100');
-        expect(mockPrismaInstance.warehouse.create).toHaveBeenCalled();
-        expect(mockPrismaInstance.warehouseData.create).toHaveBeenCalled();
-      });
-
-      test('should create draft when mediaAvailable=y', async () => {
-        mockPrismaInstance.draft.create.mockResolvedValue({
-          senderNumber: '+918076708542',
-          status: 'awaiting_images',
-        });
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: `Warehouse Owner Type: company
-Media Available: y
-Warehouse Type: PEB
-Address: Test Address
-City: Bangalore
-State: Karnataka
-Postal Code: 562149
-Contact Person: Test
-Contact Number: 9845226666
-Total Space: 50000 sqft
-Fire NOC Available: Y
-Fire Safety Measures: Hydrants
-Compliances: Test
-Rate Per Sqft: 40
-Is Broker (y/n)?: n
-Uploaded by: Test`,
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('Please send your media');
-        expect(mockPrismaInstance.draft.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              status: 'awaiting_images',
-              senderNumber: '+918076708542',
-            }),
-          })
-        );
-      });
-
-      test('should parse and save new optional fields', async () => {
-        mockPrismaInstance.warehouse.create.mockResolvedValue({ id: 101 });
-        mockPrismaInstance.warehouseData.create.mockResolvedValue({ id: 201 });
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: `Warehouse Owner Type: company
-Media Available: n
-Warehouse Type: PEB
-Address: Test Address
-City: Bangalore
-State: Karnataka
-Postal Code: 562149
-Contact Person: Test
-Contact Number: 9845226666
-Total Space: 50000 sqft
-Fire NOC Available: Y
-Fire Safety Measures: Hydrants
-Vaastu Compliance: Yes
-Approach Road Width: 40 feet
-Dimensions: 200x250
-Parking/Docking Space: 10 trucks
-Pollution Zone: Green
-Power (in kva): 1000
-Compliances: Test
-Rate Per Sqft: 40
-Is Broker (y/n)?: n
-Uploaded by: Test`,
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(mockPrismaInstance.warehouseData.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              vaastuCompliance: 'Yes',
-              approachRoadWidth: '40 feet',
-              dimensions: '200x250',
-              parkingDockingSpace: '10 trucks',
-              pollutionZone: 'Green',
-              powerKva: '1000',
-            }),
-          })
-        );
-      });
-    });
-
-    describe('Draft Management', () => {
+    // Warehouse ingestion (template parsing, drafts, close/cancel, photo collection)
+    // was removed when data entry moved to the Scout web form. Everything that used
+    // to start or continue a submission now gets the form link instead.
+    describe('Warehouse Entry Deprecated -> Scout form', () => {
       beforeEach(() => {
         mockPrismaInstance.verifiedNumber.findFirst.mockResolvedValue({
           id: 1,
@@ -235,148 +101,52 @@ Uploaded by: Test`,
         });
       });
 
-      test('should finalize draft on "close" command', async () => {
-        const mockDraft = {
-          senderNumber: '+918076708542',
-          status: 'awaiting_images',
-          imageUrls: ['https://s3.amazonaws.com/image1.jpg'],
-          warehouseData: {
-            warehouseOwnerType: 'company',
-            warehouseType: 'PEB',
-            address: 'Test',
-            city: 'Bangalore',
-            state: 'Karnataka',
-            postalCode: '562149',
-            contactPerson: 'Test',
-            contactNumber: '9845226666',
-            totalSpaceSqft: [50000],
-            fireNocAvailable: true,
-            fireSafetyMeasures: 'Hydrants',
-            compliances: 'Test',
-            ratePerSqft: '40',
-            uploadedBy: 'Test',
-            isBroker: 'n',
-          },
-          createdAt: new Date(),
-        };
-
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(mockDraft);
-        mockPrismaInstance.warehouse.create.mockResolvedValue({ id: 102 });
-        mockPrismaInstance.warehouseData.create.mockResolvedValue({ id: 202 });
-        mockPrismaInstance.draft.delete.mockResolvedValue({});
-
-        const response = await request(app)
+      const post = (body, extra = {}) =>
+        request(app)
           .post('/')
           .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: 'close',
-            NumMedia: '0',
-          });
+          .send({ From: 'whatsapp:+918076708542', Body: body, NumMedia: '0', ...extra });
+
+      test.each([
+        ['a filled-in template', 'Warehouse Type: PEB\nCity: Bhiwandi\nState: Maharashtra'],
+        ['an empty message', ''],
+        ['the close command', 'close'],
+        ['the cancel command', 'cancel'],
+        ['free text', 'Invalid warehouse data'],
+      ])('returns the Scout form link for %s', async (_label, body) => {
+        const response = await post(body);
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('All done');
-        expect(response.text).toContain('102');
-        expect(mockPrismaInstance.warehouse.create).toHaveBeenCalled();
-        expect(mockPrismaInstance.draft.delete).toHaveBeenCalled();
+        expect(response.text).toContain('scout-frontend-mu.vercel.app');
+        expect(response.text).toContain('moved off WhatsApp');
       });
 
-      test('should cancel draft on "cancel" command', async () => {
-        const mockDraft = {
-          senderNumber: '+918076708542',
-          status: 'awaiting_images',
-          imageUrls: [],
-          warehouseData: {},
-          createdAt: new Date(),
-        };
-
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(mockDraft);
-        mockPrismaInstance.draft.delete.mockResolvedValue({});
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: 'cancel',
-            NumMedia: '0',
-          });
+      test('returns the Scout form link for a photo with no assistant session', async () => {
+        const response = await post('', {
+          NumMedia: '1',
+          MediaUrl0: 'https://api.twilio.com/media/photo',
+          MediaContentType0: 'image/jpeg',
+        });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('canceled');
-        expect(mockPrismaInstance.draft.delete).toHaveBeenCalled();
+        expect(response.text).toContain('scout-frontend-mu.vercel.app');
+      });
+
+      test('never writes a Warehouse row or a Draft', async () => {
+        await post('Warehouse Type: PEB\nCity: Bhiwandi\nState: Maharashtra');
+
         expect(mockPrismaInstance.warehouse.create).not.toHaveBeenCalled();
+        expect(mockPrismaInstance.draft.create).not.toHaveBeenCalled();
       });
 
-      test('should add image to existing draft', async () => {
-        const mockDraft = {
-          senderNumber: '+918076708542',
-          status: 'awaiting_images',
-          imageUrls: ['https://s3.amazonaws.com/image1.jpg'],
-          warehouseData: {},
-          createdAt: new Date(),
-        };
+      test('logs the attempt as DEPRECATED_WAREHOUSE_ENTRY', async () => {
+        await post('Warehouse Type: PEB');
 
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(mockDraft);
-        mockPrismaInstance.draft.update.mockResolvedValue({});
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: '',
-            NumMedia: '1',
-            MediaUrl0: 'https://api.twilio.com/image.jpg',
-            MediaContentType0: 'image/jpeg',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('Image received');
-        expect(mockPrismaInstance.draft.update).toHaveBeenCalled();
-      });
-
-      test('should expire old draft (>15 minutes)', async () => {
-        const oldDate = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
-        const mockDraft = {
-          senderNumber: '+918076708542',
-          status: 'awaiting_images',
-          imageUrls: [],
-          warehouseData: {},
-          createdAt: oldDate,
-        };
-
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(mockDraft);
-        mockPrismaInstance.draft.delete.mockResolvedValue({});
-        mockPrismaInstance.draft.create.mockResolvedValue({});
-
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: `Warehouse Owner Type: company
-Media Available: y
-Warehouse Type: PEB
-Address: Test
-City: Bangalore
-State: Karnataka
-Postal Code: 562149
-Contact Person: Test
-Contact Number: 9845226666
-Total Space: 50000 sqft
-Fire NOC Available: Y
-Fire Safety Measures: Test
-Compliances: Test
-Rate Per Sqft: 40
-Is Broker (y/n)?: n
-Uploaded by: Test`,
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('expired');
-        expect(mockPrismaInstance.draft.delete).toHaveBeenCalled();
+        expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'DEPRECATED_WAREHOUSE_ENTRY' }),
+          })
+        );
       });
     });
 
@@ -387,10 +157,11 @@ Uploaded by: Test`,
           phoneNumber: '+918076708542',
           isActive: true,
         });
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(null);
       });
 
-      test('should handle parsing errors gracefully', async () => {
+      test('survives a MessageLog write failure and still replies', async () => {
+        mockPrismaInstance.messageLog.create.mockRejectedValueOnce(new Error('db down'));
+
         const response = await request(app)
           .post('/')
           .type('form')
@@ -401,14 +172,7 @@ Uploaded by: Test`,
           });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('Error');
-        expect(mockPrismaInstance.messageLog.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              status: 'FAILURE',
-            }),
-          })
-        );
+        expect(response.text).toContain('scout-frontend-mu.vercel.app');
       });
     });
 
@@ -470,7 +234,7 @@ Uploaded by: Test`,
         );
       });
 
-      test('should NOT forward to Twenty CRM when parse fails without #twenty', async () => {
+      test('should NOT forward to Twenty CRM when the message lacks #twenty', async () => {
         const response = await request(app)
           .post('/')
           .type('form')
@@ -481,7 +245,7 @@ Uploaded by: Test`,
           });
 
         expect(response.status).toBe(200);
-        expect(response.text).toContain('Error');
+        expect(response.text).toContain('scout-frontend-mu.vercel.app');
         expect(axios.get).not.toHaveBeenCalled();
         expect(axios.post).not.toHaveBeenCalled();
       });
@@ -506,48 +270,5 @@ Uploaded by: Test`,
       });
     });
 
-    describe('Template Message', () => {
-      beforeEach(() => {
-        mockPrismaInstance.verifiedNumber.findFirst.mockResolvedValue({
-          id: 1,
-          phoneNumber: '+918076708542',
-          isActive: true,
-        });
-        mockPrismaInstance.draft.findUnique.mockResolvedValue(null);
-      });
-
-      test('should send template for close/cancel without draft', async () => {
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: 'close',
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('No active submission');
-      });
-
-      test('should send template with new fields', async () => {
-        const response = await request(app)
-          .post('/')
-          .type('form')
-          .send({
-            From: 'whatsapp:+918076708542',
-            Body: '',
-            NumMedia: '0',
-          });
-
-        expect(response.status).toBe(200);
-        expect(response.text).toContain('Vaastu Compliance');
-        expect(response.text).toContain('Approach Road Width');
-        expect(response.text).toContain('Dimensions');
-        expect(response.text).toContain('Parking/Docking Space');
-        expect(response.text).toContain('Pollution Zone');
-        expect(response.text).toContain('Power (in kva)');
-      });
-    });
   });
 });
