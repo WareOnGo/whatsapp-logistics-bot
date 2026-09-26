@@ -19,6 +19,7 @@ function parseSizesToArray(input) {
 function parseWarehouseData(message) {
   const lines = message.split('\n').filter(line => line.trim() !== '');
   const data = {};
+  let hasTotalSpace = false;
 
   const keyMap = {
     'warehouse owner type': 'warehouseOwnerType',
@@ -31,7 +32,8 @@ function parseWarehouseData(message) {
     'contact person': 'contactPerson',
     'contact number': 'contactNumber',
     'total space': 'totalSpaceSqft',
-    'offered space': 'offeredSpaceSqft',
+    'offered space': 'totalSpaceSqft',
+    'offered area': 'totalSpaceSqft',
     'number of docks': 'numberOfDocks',
     'clear height': 'clearHeightFt',
     'compliances': 'compliances',
@@ -70,6 +72,12 @@ function parseWarehouseData(message) {
     if (results.length > 0) {
       const bestMatchKey = results[0].item;
       const modelKey = keyMap[bestMatchKey];
+      // Area labels feed one column. Explicit Total Space wins over older
+      // Offered Space labels when an old template contains both.
+      if (modelKey === 'totalSpaceSqft') {
+        if (bestMatchKey !== 'total space' && hasTotalSpace) return;
+        if (bestMatchKey === 'total space') hasTotalSpace = true;
+      }
       data[modelKey] = value;
     }
   });
@@ -79,7 +87,6 @@ function parseWarehouseData(message) {
   if (data.totalSpaceSqft) {
     data.totalSpaceSqft = parseSizesToArray(data.totalSpaceSqft);
   }
-  // offeredSpaceSqft is left as a string
   
   // Parse Fire NOC availability to boolean
   if (data.fireNocAvailable) {

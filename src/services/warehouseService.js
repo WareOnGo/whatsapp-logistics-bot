@@ -74,6 +74,7 @@ async function saveWarehouse(data) {
     parkingDockingSpace,
     pollutionZone,
     powerKva,
+    offeredSpaceSqft: _legacyArea,
     ...warehouseData 
   } = data;
   

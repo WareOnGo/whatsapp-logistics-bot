@@ -20,7 +20,8 @@ model Warehouse {
   contactPerson               String
   contactNumber               String
   totalSpaceSqft              Int[]
-  offeredSpaceSqft            String?
+  /// Legacy storage only; application area uses totalSpaceSqft.
+  offeredSpaceSqft            String? @ignore
   numberOfDocks               String?
   clearHeightFt               String?
   compliances                 String
@@ -339,7 +340,8 @@ model StagedWarehouse {
   contactPerson               String?
   contactNumber               String?
   totalSpaceSqft              Int[]
-  offeredSpaceSqft            String?
+  /// Legacy storage only; application area uses totalSpaceSqft.
+  offeredSpaceSqft            String? @ignore
   numberOfDocks               String?
   clearHeightFt               String?
   compliances                 String?

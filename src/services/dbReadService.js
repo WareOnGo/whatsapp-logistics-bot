@@ -141,7 +141,7 @@ const QUERIES = {
     build(a) {
       return {
         sql: `SELECT w.id, w.city, w.state, w.zone, w.address, w."warehouseType" AS type,
-                     w."ratePerSqft" AS rate, w."totalSpaceSqft" AS sqft, w."offeredSpaceSqft" AS offered_sqft,
+                     w."ratePerSqft" AS rate, w."totalSpaceSqft" AS sqft,
                      w."clearHeightFt" AS clear_height_ft, w."numberOfDocks" AS docks, w.compliances,
                      w.availability, w.status,
                      wd.latitude, wd.longitude, wd."powerKva" AS power_kva,
